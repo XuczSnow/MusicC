@@ -1,17 +1,12 @@
 import os
-import io
 import sys
 import requests
 import datetime
 from collections import defaultdict
 
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
-
 from music_tag import *
 from load_music import *
 
-# ✅ AI模型
-from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 
 # ---------------- CONFIG ----------------
@@ -41,11 +36,6 @@ if len(sys.argv) > 1:
 # MUSIC_DIR = r"."
 # MAX_SAMPLE = 50
 
-HEADERS = {
-    "Referer": "http://music.163.com",
-    "User-Agent": "Mozilla/5.0"
-}
-
 # ===== 全局日志函数 =====
 _logger = print  # ✅ 默认用print
 
@@ -58,83 +48,45 @@ model = None
 tag_embeddings = {}
 
 def get_model():
+    # ✅ AI模型
+    from sentence_transformers import SentenceTransformer
+
     global model
     global tag_embeddings
 
     if model is None:
-        _logger("⏳加载AI模型...\n")
+        _logger("\n    ⏳加载AI模型...")
     else:
-        _logger("✅ AI模型已预加载\n")
+        # _logger("✅ AI模型已预加载")
         return model
 
-    MODEL_PATH = r"./models/models--sentence-transformers--all-MiniLM-L6-v2"
+    MODEL_PATH = resource_path("./models/models--sentence-transformers--all-MiniLM-L6-v2")
     model = SentenceTransformer(MODEL_PATH)
 
 # ---------------- AI标签语义 ----------------
-    tag_embeddings_mood = {
+    tag_embeddings = {
         tag: model.encode(" ".join(map(str, text)))
-        for tag, text in TAG_DEFINITIONS["mood"].items()
+        for tag, text in AI_LYRICS_DEFINITIONS.items()
     }
 
-    tag_embeddings_theme = {
-        tag: model.encode(" ".join(map(str, text)))
-        for tag, text in TAG_DEFINITIONS["theme"].items()
-    }
+    # tag_embeddings_theme = {
+    #     tag: model.encode(" ".join(map(str, text)))
+    #     for tag, text in TAG_DEFINITIONS["theme"].items()
+    # }
+    
+    # for tag, text in TAG_DEFINITIONS["theme"].items():
+    #     print(" ".join(map(str, text)))
 
-    tag_embeddings = tag_embeddings_mood | tag_embeddings_theme
-    _logger("✅ AI模型加载完成\n")
+    # tag_embeddings = tag_embeddings_mood | tag_embeddings_theme
+    _logger("    ✅ AI模型加载完成")
 
     return model
 
 # ---------------- 年代 ----------------
-def get_year_from_netease(title, artist=""):
-
-    try:
-        # 1️⃣ 搜索歌曲
-        r = requests.get(
-            "http://music.163.com/api/search/get",
-            params={
-                "s": f"{title} {artist}",
-                "type": 1,
-                "limit": 1
-            },
-            headers=HEADERS,
-            timeout=5
-        )
-
-        data = r.json()
-        song_id = data["result"]["songs"][0]["id"]
-
-        # 2️⃣ 获取歌曲详情
-        r2 = requests.get(
-            "http://music.163.com/api/song/detail",
-            params={"ids": f"[{song_id}]"},
-            headers=HEADERS,
-            timeout=5
-        )
-
-        songs = r.json()["result"]["songs"]
-
-        best_year = 0
-
-        for song in songs:
-            pt = song["album"].get("publishTime", 0)
-            if pt:
-                year = datetime.datetime.fromtimestamp(pt/1000).year
-                best_year = year
-                break
-
-        return best_year
-
-    except:
-        pass
-
-    return 0
 
 def year_tag(song):
-    y = song["year"]
-    if not y:
-        y = get_year_from_netease(song["title"],song["artist"])
+    y = int(song["year"][:4])
+
     if y == 0:
         return ""
     else:
@@ -152,9 +104,9 @@ def year_tag(song):
     # else:
     #     return "📅_2020s"
 
-# ---------------- 网易云搜索 ----------------
+# ---------------- 在线云搜索 ----------------
 def wy_search(keyword):
-    _logger("⏳在线分类中...\n")
+    _logger("    ⏳在线分类中...")
     url = "http://localhost:8080/api/v1/music/search"
     results = []
 
@@ -164,13 +116,11 @@ def wy_search(keyword):
 
     try:
         r = requests.get(url, params=params)
-        print(r)
         data = r.json().get("data",[])
 
         for p in data.get("playlists",[])[:NET_LIMIT]:
             if p.get("play_count", 0) > 10000:
                 results.append(p["name"])
-        print(data)
     except:
         pass
 
@@ -193,6 +143,8 @@ def extract_tags(name):
 
 # ---------------- AI语义标签 ----------------
 def ai_tags(title, artist):
+
+    _logger("    ⏳AI分类中...")
     model = get_model()
 
     text = f"{title} {artist}"
@@ -210,7 +162,8 @@ def ai_tags(title, artist):
     return results
 
 def ai_tags_from_lyric(lyric):
-    _logger("⏳AI分类中...\n")
+
+    _logger("    ⏳AI分类中...")
     model = get_model()
     if not lyric:
         return []
@@ -223,7 +176,7 @@ def ai_tags_from_lyric(lyric):
 
         score = cosine_similarity([emb], [tag_emb])[0][0]
 
-        if score > 0.35:
+        if score > AI_THRESHOLD:
             results.append(("AI", tag, score))
 
     return results
@@ -231,10 +184,10 @@ def ai_tags_from_lyric(lyric):
 # ---------------- 分类 ----------------
 def classify(songs):
 
-    _logger("⏳歌曲分类中...\n")
+    _logger("\n⏳歌曲分类中...")
     for s in songs[:MAX_SAMPLE]:
         keyword = f"{s['title']} {s['artist']}"
-        _logger("  ->分析:"+keyword)
+        _logger("\n  分析:"+keyword)
 
         names = wy_search(keyword)
 
@@ -278,12 +231,12 @@ def classify(songs):
 
         # # ✅ 限制标签数量
         # s["tags"] = list(set(s["tags"]))[:5]
-    _logger("✅ 歌曲分析完成\n")
+    _logger("\n✅ 歌曲分析完成")
     return songs
 
 # ---------------- 输出 ----------------
 def save(songs):
-    _logger("⏳生成歌单中...\n")
+    _logger("\n⏳生成歌单中...")
     grouped = defaultdict(list)
 
     for s in songs:
@@ -291,14 +244,17 @@ def save(songs):
             name = f"{src}_{tag}"
             grouped[name].append(s)
 
-    os.makedirs("AI分类歌单", exist_ok=True)
+    path = f"{MUSIC_DIR}/AI分类歌单"
+
+    os.makedirs(path, exist_ok=True)
 
     for tag_name, song_objs in grouped.items():
 
         # ✅ 排序（所有歌单保持一致）
         song_objs = sorted(song_objs, key=lambda x: x["score"], reverse=True)
 
-        file_path = f"AI分类歌单/{tag_name}.m3u"
+        tag_name = sanitize_filename(tag_name)
+        file_path = f"{path}/{tag_name}/{tag_name}.m3u"
 
         with open(file_path, "w", encoding="utf-8") as f:
 
@@ -324,7 +280,7 @@ def save(songs):
     # ✅ DailyMix
     ranked = sorted(songs, key=lambda x: x["score"], reverse=True)
 
-    file_path = "AI分类歌单/DailyMix.m3u"
+    file_path = f"{path}/DailyMix/DailyMix.m3u"
 
     with open(file_path, "w", encoding="utf-8") as f:
         f.write("#EXTM3U\n")
@@ -380,13 +336,13 @@ def run_classifier(
     set_logger(log)
 
     songs = load_music(MUSIC_DIR)
-    _logger("✅ 本地歌曲:" + str(len(songs)) + "\n")
+    _logger("✅ 本地歌曲:" + str(len(songs)))
 
     songs = classify(songs)
     save(songs)
 
     if log:
-        log("✅ 分类完成\n")
+        log("\n✅ 分类完成")
 
 if __name__ == "__main__":
     run_classifier(MUSIC_DIR)

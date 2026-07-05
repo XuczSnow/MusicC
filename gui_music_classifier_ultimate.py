@@ -2,12 +2,13 @@
 import customtkinter as ctk
 import threading
 
-from tkinter import filedialog
 from start_service import *
-
+from tkinter import filedialog
+    
 # ✅ 全局主题
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("green")
+
 
 # ================= 窗口 =================
 app = ctk.CTk()
@@ -28,11 +29,26 @@ tabview.pack(fill="both", expand=True)
 
 main_tab = tabview.add("本地分类")
 net_tab = tabview.add("平台歌单")
+meta_tab = tabview.add("元数据增强")
+organize_tab = tabview.add("音乐整理")
 
-from net_playlist_page import create_net_page
+def load_net_page():
 
-net_frame = create_net_page(net_tab)
-net_frame.pack(fill="both", expand=True)
+    from net_playlist_page import create_net_page
+
+    net_frame = create_net_page(net_tab)
+    net_frame.pack(fill="both", expand=True)
+
+def load_mate_page():
+    from metadata_page import create_metadata_page
+    net_frame = create_metadata_page(meta_tab)
+    net_frame.pack(fill="both", expand=True)
+
+def load_ori_page():
+    from organize_page import create_organize_page
+
+    net_frame = create_organize_page(organize_tab)
+    net_frame.pack(fill="both", expand=True)
 
 # ================= 路径选择 =================
 frame_path = ctk.CTkFrame(main_tab)
@@ -74,26 +90,38 @@ ctk.CTkCheckBox(frame_switch, text="歌手精选", variable=var_artist).pack(sid
 ctk.CTkCheckBox(frame_switch, text="年代", variable=var_era).pack(side="left", padx=10)
 
 # ✅ 第二行：阈值
-label_ai = ctk.CTkLabel(frame_control, text="AI阈值（匹配敏感度）")
+label_ai = ctk.CTkLabel(frame_control, text="AI阈值（匹配敏感度 0.2-0.8）: 0.4")
 label_ai.pack(anchor="w", padx=10)
+
+def ai_slider_changed(value):
+    label_ai.configure(text="AI阈值（匹配敏感度 0.2-0.8）: "+format(value, '.2f'))
 
 slider_ai = ctk.CTkSlider(frame_control, from_=0.2, to=0.8)
 slider_ai.set(0.4)
+slider_ai.configure(command=ai_slider_changed)
 slider_ai.pack(fill="x", padx=10)
 
 # ✅ 第三行：权重
-label_weight_ai = ctk.CTkLabel(frame_control, text="AI权重（推荐影响）")
+label_weight_ai = ctk.CTkLabel(frame_control, text="AI权重（推荐影响 1-5）: 2")
 label_weight_ai.pack(anchor="w", padx=10)
+
+def ai_weight_slider_changed(value):
+    label_weight_ai.configure(text="AI权重（推荐影响 1-5）: "+str(int(value)))
 
 slider_weight_ai = ctk.CTkSlider(frame_control, from_=1, to=5)
 slider_weight_ai.set(2)
+slider_weight_ai.configure(command=ai_weight_slider_changed)
 slider_weight_ai.pack(fill="x", padx=10)
 
-label_weight_net = ctk.CTkLabel(frame_control, text="NET权重（规则影响）")
+label_weight_net = ctk.CTkLabel(frame_control, text="网络权重（规则影响 0-5）: 1")
 label_weight_net.pack(anchor="w", padx=10)
 
-slider_weight_net = ctk.CTkSlider(frame_control, from_=0, to=3)
+def net_weight_slider_changed(value):
+    label_weight_net.configure(text="网络权重（规则影响 0-5）: "+str(int(value)))
+
+slider_weight_net = ctk.CTkSlider(frame_control, from_=0, to=5)
 slider_weight_net.set(1)
+slider_weight_net.configure(command=net_weight_slider_changed)
 slider_weight_net.pack(fill="x", padx=10)
 
 # ✅ 第四行：样本数
@@ -131,7 +159,39 @@ def log(msg):
 status_label = ctk.CTkLabel(main_tab, text="状态：空闲 ⏳")
 status_label.pack()
 
-start_go_music_api(lambda msg: app.after(0, log, msg+"\n"))
+# ================= 底部状态 =================
+
+bottom_label = ctk.CTkLabel(
+    app,
+    text="初始化中..."
+)
+
+bottom_label.pack(side="right")
+
+def initialize():
+
+    # 启动API（后台）
+    threading.Thread(
+        target=lambda: start_go_music_api(
+            lambda msg: app.after(0, log, msg + "\n"), bottom_label),
+        daemon=True
+    ).start()
+
+    # 延迟加载
+    app.after(
+        500,
+        load_net_page
+    )
+
+    app.after(
+        500,
+        load_mate_page
+    )
+
+    app.after(
+        500,
+        load_ori_page
+    )
 
 # ================= 运行 =================
 def run_task():
@@ -240,6 +300,10 @@ def on_close():
 
 app.protocol("WM_DELETE_WINDOW", on_close)
 
-
 # ================= 启动 =================
+app.after(
+    100,
+    initialize
+)
+
 app.mainloop()

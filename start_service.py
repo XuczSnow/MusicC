@@ -2,6 +2,8 @@ import subprocess
 import time
 import requests
 
+from music_tag import *
+
 api_process = None
 
 _logger = print  # ✅ 默认用print
@@ -10,7 +12,7 @@ def set_logger(func):
     global _logger
     _logger = func
 
-def start_go_music_api(log = None):
+def start_go_music_api(log = None, label = None):
 
     global api_process
 
@@ -22,16 +24,21 @@ def start_go_music_api(log = None):
         print(r)
         if r.status_code == 200:
             _logger("✅ go-music-api 已经运行")
+            label.configure(text="API运行中")
             return
     except:
         pass
 
     _logger("🚀 启动 go-music-api...")
 
+    startupinfo = subprocess.STARTUPINFO()
+    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
     api_process = subprocess.Popen(
-        "./bin/go-music-api_windows_amd64/go-music-api.exe",
+        [resource_path("./bin/go-music-api_windows_amd64/go-music-api.exe")],
         stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL
+        stderr=subprocess.DEVNULL,
+        startupinfo=startupinfo,
+        creationflags=subprocess.CREATE_NO_WINDOW
     )
 
     # ✅ 等待服务启动
@@ -41,12 +48,14 @@ def start_go_music_api(log = None):
             print(r)
             if r.status_code == 200:
                 _logger("✅ 启动成功")
+                label.configure(text="API运行中")
                 return
         except:
             pass
 
         time.sleep(1)
 
+    label.configure(text="API未启动, 请重启软件")
     _logger("❌ 启动失败")
 
 def stop_go_music_api():

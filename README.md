@@ -129,5 +129,4 @@ Apache License 2.0
 
 ## 现有问题记录
 
-1. mp3文件支持有bug
-2. 音乐年份获取统一使用netease源
+1. 音乐年份获取统一使用netease源

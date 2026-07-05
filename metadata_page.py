@@ -126,7 +126,7 @@ def fetch_song_meta(title, artist="", date_en = 1):
 
         if not songs:
             return None
-    
+
         for song in songs:
             if song["source"] == PLATFORM:
                 if song["name"] in title or song["name"] in artist:
@@ -158,9 +158,9 @@ def fetch_song_meta(title, artist="", date_en = 1):
         except Exception:
             pass
 
+        year = ""
         if date_en:
             year = get_year_from_netease(s.get("name", title), s.get("artist", artist))
-        print(year)
 
         return {
             "title": s.get("name", title),
@@ -206,7 +206,12 @@ def make_flac_picture(img, max_size: int = 800) -> Picture:
  
     return pic
 
-def rewrite_songs(overwrite, audio, meta, type):
+def rewrite_songs(overwrite, path, meta, type):
+
+    if type == "flac":
+        audio = FLAC(path)
+    elif type == "mp3":
+        audio = EasyID3(path)
 
     # 基础数据
     if overwrite or not audio.get("title"):
@@ -221,8 +226,6 @@ def rewrite_songs(overwrite, audio, meta, type):
         __log(f"  -> 重写 album: {meta["album"]}")
         audio["album"] = meta["album"]
 
-    print(not audio.get("date"))
-
     if overwrite or not audio.get("date"):
         __log(f"  -> 重写 date: {meta["year"]}")
         audio["date"] = meta["year"]
@@ -233,13 +236,13 @@ def rewrite_songs(overwrite, audio, meta, type):
             if overwrite or not audio.get("lyrics"):
                 __log(f"  -> 重写 lyric")
                 audio["lyrics"] = meta["lyric"]
-        elif type == "id3":
-            if overwrite:
-                audio.delall("USLT")
+        elif type == "mp3":
+            audio = MP3(path)
 
-            if overwrite or not audio.getall("USLT"):
+            if overwrite or not audio.tags.getall("USLT"):
+                audio.tags.delall("USLT")
                 __log(f"  -> 重写 lyric")
-                audio.add(USLT(encoding=3, text=meta["lyric"]))
+                audio.tags.add(USLT(encoding=3, text=meta["lyric"]))
     #封面
     cover = download_cover(meta.get("cover"))
     if cover:
@@ -248,11 +251,11 @@ def rewrite_songs(overwrite, audio, meta, type):
                 __log(f"  -> 加入封面图片")
                 pic = make_flac_picture(BytesIO(cover), max_size=PIXEL_LIMIT)
                 audio.add_picture(pic)
-        elif type == "id3":
+        elif type == "mp3":
             if cover:
-                if overwrite or not audio.getall("APIC"):
+                if overwrite or not audio.tags.getall("APIC"):
                     __log(f"  -> 加入封面图片")
-                    audio.add(APIC(
+                    audio.tags.add(APIC(
                         encoding=3,
                         mime="image/jpeg",
                         type=3,
@@ -264,37 +267,20 @@ def rewrite_songs(overwrite, audio, meta, type):
 def write_song_metadata(song, meta, overwrite=False):
     path = song["path"]
 
-    # try:
-    if path.lower().endswith(".flac"):
+    try:
+        if path.lower().endswith(".flac"):
 
-        audio = FLAC(path)
-        audio = rewrite_songs(overwrite, audio, meta, "flac")
-        audio.save()
+            audio = rewrite_songs(overwrite, path, meta, "flac")
+        elif path.lower().endswith(".mp3"):
+            audio = rewrite_songs(overwrite, path, meta, "mp3")
+            audio.save()
+        else:
+            return f"不支持的文件类型: {path}"
 
-    else:
+        return True
 
-        try:
-            audio = EasyID3(path)
-        except Exception:
-            mp3 = MP3(path)
-            if mp3.tags is None:
-                mp3.add_tags()
-                mp3.save()
-            audio = EasyID3(path)
-
-        audio = rewrite_songs(overwrite, audio, meta, "mp3")
-        audio.save()
-
-        tags = ID3(path)
-
-        tags = rewrite_songs(overwrite, audio, meta, "id3")
-
-        tags.save()
-
-    return True
-
-    # except Exception as e:
-        # return str(e)
+    except Exception as e:
+        return str(e)
     
 def create_metadata_page(parent):
     global __log

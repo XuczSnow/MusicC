@@ -3,7 +3,7 @@
 ; Non-commercial use only
 
 #define MyAppName "AI Music Classifier"
-#define MyAppVersion "1.0.0"
+#define MyAppVersion "1.0.1"
 #define MyAppPublisher "Xucz"
 #define MyAppURL "http://www.xuczsnow.cc.cd/"
 #define MyAppExeName "AI Music Classifier.exe"
@@ -35,7 +35,7 @@ DisableProgramGroupPage=yes
 ; Uncomment the following line to run in non administrative install mode (install for current user only).
 ;PrivilegesRequired=lowest
 OutputDir=inno
-OutputBaseFilename=AIMusicClassifier_v1.0.0
+OutputBaseFilename=AIMusicClassifier_v1.0.1
 SetupIconFile=icon.ico
 SolidCompression=yes
 WizardStyle=modern windows11

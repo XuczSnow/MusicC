@@ -85,7 +85,11 @@ def get_model():
 # ---------------- 年代 ----------------
 
 def year_tag(song):
-    y = int(song["year"][:4])
+
+    try:
+        y = int(song["year"][:4])
+    except (ValueError, TypeError):
+        return ""
 
     if y == 0:
         return ""
@@ -189,9 +193,9 @@ def classify(songs):
         keyword = f"{s['title']} {s['artist']}"
         _logger("\n  分析:"+keyword)
 
-        names = wy_search(keyword)
-
         if USE_NET:
+            names = wy_search(keyword)
+
             # ✅ 歌单标签
             for n in names:
 
@@ -254,6 +258,7 @@ def save(songs):
         song_objs = sorted(song_objs, key=lambda x: x["score"], reverse=True)
 
         tag_name = sanitize_filename(tag_name)
+        os.makedirs(f"{path}/{tag_name}", exist_ok=True)
         file_path = f"{path}/{tag_name}/{tag_name}.m3u"
 
         with open(file_path, "w", encoding="utf-8") as f:
@@ -280,6 +285,7 @@ def save(songs):
     # ✅ DailyMix
     ranked = sorted(songs, key=lambda x: x["score"], reverse=True)
 
+    os.makedirs(f"{path}/DailyMix", exist_ok=True)
     file_path = f"{path}/DailyMix/DailyMix.m3u"
 
     with open(file_path, "w", encoding="utf-8") as f:

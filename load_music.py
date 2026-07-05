@@ -34,36 +34,37 @@ def split_path(path):
     return [title, artist]
 
 def get_song_info(path:str, type:str):
-
+    lyric = ''
     try:
         if type == "flac":
             audio = FLAC(path)
-        else:
+        elif type == "mp3":
             audio = EasyID3(path)
         title = audio.get("title", [""])[0]
         artist = audio.get("artist", [""])[0]
-        duration = int(audio.info.length)
         album = audio.get("album", ["未知专辑"])[0]
         if not artist:
             artist = audio.get("albumartist", [""])[0]
         year = audio.get("date", [''])[0]
 
         if type == "flac":
+            duration = int(audio.info.length)
             lyric = clean(str(audio.get("lyrics", [""])[0]))
             cover = True if audio.pictures else False
         elif type == "mp3":
             audio = MP3(path)
+            duration = int(audio.info.length)
             if audio.tags:
                 for tag in audio.tags:
                     if tag.startswith("USLT"):
                         lyric = clean(str(audio.tags[tag]))
                         break
-            cover = True if audio.getall("APIC") else False
+            cover = True if audio.tags.getall("APIC") else False
         res = split_path(path)
         if not title:
-            title = res[0]
+            title = res[1]
         if not artist:
-            artist = res[1]
+            artist = res[0]
     except:
         title = ''
         artist = ''

@@ -160,7 +160,6 @@ def get_netease_multi(keyword, list_limit=30, platform="all", log=None):
             if log:
                 log(f"❌ 获取失败: {e}\n")
 
-    print(result)
     return result
 
 # ================= 保存为 m3u =================

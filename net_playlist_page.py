@@ -4,6 +4,7 @@
 import customtkinter as ctk
 import requests
 import random
+import time
 
 from tkinter import filedialog
 
@@ -86,6 +87,7 @@ def get_netease_multi(keyword, list_limit=30, platform="all", log=None):
 
     result = []
 
+    time.sleep(0.5)
     # ===== 1️⃣ 搜索歌单 =====
     try:
         r = requests.get(
@@ -169,6 +171,7 @@ def save_playlist(name, songs, cover_url = ''):
     import os
 
     path = f"{MUSIC_DIR}/AI分类歌单"
+    path = Path(path).as_posix()
     os.makedirs(path, exist_ok=True)
 
     name = sanitize_filename(name)
@@ -176,6 +179,7 @@ def save_playlist(name, songs, cover_url = ''):
     file_path = f"{path}/{name}/{name}.m3u"
     if cover_url != '':
         save_playlist_cover(name, cover_url, f"{path}/{name}")
+    __log(f"  ->生成:{file_path}\n")
 
     with open(file_path, "w", encoding="utf-8") as f:
 
@@ -473,10 +477,10 @@ def create_net_page(parent):
                     )
             # ================= 随机歌曲 =================
             elif mode_var.get() == "local":
-                page = int(limit/10)
+                page = int((limit-1)/10)+1
                 num_song = len(songs)
                 label_en = [0]*num_song
-                loop_count = (page+1 if num_song > page else num_song+1)
+                loop_count = (page if num_song > page else num_song)
 
                 i = 0
                 while i < loop_count:
@@ -484,6 +488,8 @@ def create_net_page(parent):
                     if label_en[idx] != 1:
                         label_en[idx] = 1
                         i=i+1 #避免重复
+                    else:
+                        continue
                     title = songs[idx]["title"]
                     artist = songs[idx]["artist"]
                     keywords = title + " " + artist
@@ -497,6 +503,10 @@ def create_net_page(parent):
                         platform = platform,
                         log=log
                     )
+
+                    if i%10 == 0:
+                        log(f"⏳ 已网络处理 {i*10} 个歌单，请等待10秒~")
+                        time.sleep(10)
             # ================= 自定义关键词 =================
             else:
 

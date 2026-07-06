@@ -5,7 +5,7 @@ a = Analysis(
     ['gui_music_classifier_ultimate.py'],
     pathex=[],
     binaries=[],
-    datas=[('bin', 'bin'), ('models', 'models')],
+    datas=[('bin', 'bin'), ('models', 'models'), ('asset', 'asset')],
     hiddenimports=[
         # PIL 核心
         'PIL',

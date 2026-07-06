@@ -1,13 +1,49 @@
 import os
 import re
-from music_tag import *
+from datetime import datetime
 
+from music_tag import *
+from cache_manager import JsonCache
+
+from pathlib import Path
 from mutagen.easyid3 import EasyID3
 from mutagen.flac import FLAC
 from mutagen.mp3 import MP3
 
+from pathlib import Path
 
-pattern = re.compile(r'[^a-zA-Z\u4e00-\u9fff\s ]')
+# music_cache = JsonCache(
+#     cache_file=Path(__file__).parent / "cache" / "music_cache.json",
+#     expire_days=30
+# )
+
+songs = []
+global_path = ""
+
+def is_modified_before(filepath, target_time):
+    """
+    判断文件最后修改时间是否早于 target_time
+    
+    target_time 支持:
+    - datetime 对象（建议带时区）
+    - 时间戳（float/int，秒）
+    - 字符串（如 "2024-01-01 12:00:00"）
+    """
+    # 统一转换为时间戳
+    if isinstance(target_time, datetime):
+        # 带时区的 datetime
+        if target_time.tzinfo is not None:
+            target_ts = target_time.timestamp()
+        else:
+            # 无时区视为本地时间
+            target_ts = target_time.timestamp()
+    elif isinstance(target_time, str):
+        target_ts = datetime.strptime(target_time, "%Y-%m-%d %H:%M:%S").timestamp()
+    else:
+        target_ts = float(target_time)
+    
+    mtime = os.path.getmtime(filepath)
+    return mtime < target_ts
 
 def sanitize_filename(name):
     # 替换非法字符
@@ -22,15 +58,18 @@ def sanitize_filename(name):
 
     return name
 
+pattern = re.compile(r'[^a-zA-Z\u4e00-\u9fff\s ]')
 def clean(text):
     return pattern.sub('', text)
 
 def split_path(path):
-    title = os.path.splitext(path)[0].split(" ")[0]
+    path_split = path.split('/')[-1].split('\\')[-1].split(' - ')
+    # print(path_split)
+    artist = path_split[0]
     try:
-        artist = os.path.splitext(path)[0].split(" ")[2]
+        title = path_split[1].split('.')[0]
     except:
-        artist = ''
+        title = ''
     return [title, artist]
 
 def get_song_info(path:str, type:str):
@@ -62,9 +101,9 @@ def get_song_info(path:str, type:str):
             cover = True if audio.tags.getall("APIC") else False
         res = split_path(path)
         if not title:
-            title = res[1]
+            title = res[0]
         if not artist:
-            artist = res[0]
+            artist = res[1]
     except:
         title = ''
         artist = ''
@@ -78,7 +117,7 @@ def get_song_info(path:str, type:str):
         "title": title,
         "artist": artist,
         "year": year,
-        "path": path,
+        "path": Path(path).as_posix(),
         "lyric": lyric,
         "duration": duration,
         "album": album,
@@ -88,15 +127,23 @@ def get_song_info(path:str, type:str):
     }
 
 def load_music(folder):
+    global songs, global_path
 
-    songs = []
-    folder = resource_path(folder)
+    if songs and global_path == folder:
+        return songs
+    else:
+        songs = []
 
-    for root, _, files in os.walk(folder):
+    global_path = resource_path(folder)
+
+    unique = {}
+    song_idx = 0
+
+    for root, _, files in os.walk(global_path):
 
         for f in files:
 
-            if f.lower().endswith((".mp3", ".flac", ".m4a")):
+            if f.lower().endswith((".mp3", ".flac")):
 
                 path = os.path.join(root, f)
 
@@ -105,7 +152,21 @@ def load_music(folder):
                 else:
                     song = get_song_info(path, "mp3")
                 
-                # print(song)
+                key = (
+                    song["title"].strip().lower(),
+                    song["artist"].strip().lower()
+                )
+
+                if key in unique:
+                    print(f"歌曲重复：{song}")
+                    print(f"已存在：{songs[unique[key]]}")
+                    if path.lower().endswith(".flac") and songs[unique[key]]['path'].lower().endswith(".mp3"):
+                        print("优先选取flac文件")
+                        songs[unique[key]] = song
+                    continue
+                
+                unique[key] = song_idx
                 songs.append(song)
+                song_idx += 1
 
     return songs

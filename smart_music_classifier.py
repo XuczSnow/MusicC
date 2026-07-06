@@ -1,11 +1,14 @@
 import os
 import sys
+import time
+import shutil
 import requests
-import datetime
+
 from collections import defaultdict
 
 from music_tag import *
 from load_music import *
+from cache_manager import JsonCache
 
 from sklearn.metrics.pairwise import cosine_similarity
 
@@ -54,10 +57,7 @@ def get_model():
     global model
     global tag_embeddings
 
-    if model is None:
-        _logger("\n    ⏳加载AI模型...")
-    else:
-        # _logger("✅ AI模型已预加载")
+    if model != None:
         return model
 
     MODEL_PATH = resource_path("./models/models--sentence-transformers--all-MiniLM-L6-v2")
@@ -109,22 +109,57 @@ def year_tag(song):
     #     return "📅_2020s"
 
 # ---------------- 在线云搜索 ----------------
-def wy_search(keyword):
+ArtistSLCache = JsonCache("cahce/songlist_cache_artist.json")
+AlbumSLCache = JsonCache("cahce/songlist_cache_album.json")
+search_cnt = 0
+
+def wy_search(title, artist, album):
+    global search_cnt
+
     _logger("    ⏳在线分类中...")
     url = "http://localhost:8080/api/v1/music/search"
     results = []
 
-    params = {
-        "q": keyword,
-        "type": "playlist"}
+    if search_cnt%20 == 0 and search_cnt != 0:
+        _logger(f"⏳ 已网络处理 {search_cnt} 首歌曲，请等待10秒~")
+        time.sleep(10)
+    else:
+        time.sleep(0.5)
 
     try:
-        r = requests.get(url, params=params)
-        data = r.json().get("data",[])
-
-        for p in data.get("playlists",[])[:NET_LIMIT]:
+        params = {
+            "q": artist,
+            "type": "playlist"}
+        data = ArtistSLCache.get(artist)
+        if not data:
+            search_cnt +=1
+            r = requests.get(url, params=params)
+            data = r.json().get("data",[])
+            ArtistSLCache.set(artist, data)
+        plylist = data.get("playlists",[])
+        plylist = sorted(plylist, key=lambda x: x["play_count"], reverse=True)
+        for p in plylist[:NET_LIMIT]:
             if p.get("play_count", 0) > 10000:
                 results.append(p["name"])
+            else:
+                break
+
+        params = {
+            "q": album,
+            "type": "playlist"}
+        data = AlbumSLCache.get(album)
+        if not data:
+            search_cnt +=1
+            r = requests.get(url, params=params)
+            data = r.json().get("data",[])
+            AlbumSLCache.set(album, data)
+        plylist = data.get("playlists",[])
+        plylist = sorted(plylist, key=lambda x: x["play_count"], reverse=True)
+        for p in plylist[:NET_LIMIT]:
+            if p.get("play_count", 0) > 10000:
+                results.append(p["name"])
+            else:
+                break
     except:
         pass
 
@@ -194,7 +229,7 @@ def classify(songs):
         _logger("\n  分析:"+keyword)
 
         if USE_NET:
-            names = wy_search(keyword)
+            names = wy_search(s['title'], s['artist'], s['album'])
 
             # ✅ 歌单标签
             for n in names:
@@ -243,6 +278,10 @@ def save(songs):
     _logger("\n⏳生成歌单中...")
     grouped = defaultdict(list)
 
+    # 存储缓存
+    ArtistSLCache.save()
+    AlbumSLCache.save()
+
     for s in songs:
         for src, tag in s["tags"]:
             name = f"{src}_{tag}"
@@ -258,15 +297,18 @@ def save(songs):
         song_objs = sorted(song_objs, key=lambda x: x["score"], reverse=True)
 
         tag_name = sanitize_filename(tag_name)
-        os.makedirs(f"{path}/{tag_name}", exist_ok=True)
-        file_path = f"{path}/{tag_name}/{tag_name}.m3u"
+        file_dir = f"{path}/{tag_name}"
+        os.makedirs(file_dir, exist_ok=True)
+        file_path = f"{file_dir}/{tag_name}.m3u"
+
+        shutil.copy(resource_path("asset/cover.jpeg"), file_dir)
 
         with open(file_path, "w", encoding="utf-8") as f:
 
             f.write("#EXTM3U\n")
             f.write(f"#PLAYLIST:{tag_name}\n")
 
-            for s in song_objs:
+            for s in song_objs[:50]:
 
                 title = s.get("title", "未知")
                 artist = s.get("artist", "未知")
@@ -285,14 +327,16 @@ def save(songs):
     # ✅ DailyMix
     ranked = sorted(songs, key=lambda x: x["score"], reverse=True)
 
-    os.makedirs(f"{path}/DailyMix", exist_ok=True)
-    file_path = f"{path}/DailyMix/DailyMix.m3u"
+    file_dir = f"{path}/DailyMix"
+    os.makedirs(file_dir, exist_ok=True)
+    file_path = f"{file_dir}/DailyMix.m3u"
+    shutil.copy(resource_path("asset/cover.jpeg"), file_dir)
 
     with open(file_path, "w", encoding="utf-8") as f:
         f.write("#EXTM3U\n")
         f.write("#PLAYLIST:DailyMix\n")
 
-        for s in ranked[:30]:
+        for s in ranked[:50]:
             title = s.get("title", "未知")
             artist = s.get("artist", "未知")
             album = s.get("album", "未知专辑")

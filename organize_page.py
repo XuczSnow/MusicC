@@ -93,6 +93,45 @@ def create_organize_page(parent):
         side="right",
         padx=10
     )
+    
+    out_path_frame = ctk.CTkFrame(frame)
+
+    out_path_frame.pack(
+        fill="x",
+        padx=20,
+        pady=10
+    )
+    
+    output_entry = ctk.CTkEntry(
+        out_path_frame,
+        placeholder_text="选择输出目录..."
+    )
+
+    output_entry.pack(
+        side="left",
+        fill="x",
+        expand=True,
+        padx=(10, 5),
+        pady=10
+    )
+
+    def out_browse_folder():
+
+        folder = filedialog.askdirectory()
+
+        if folder:
+            output_entry.delete(0, "end")
+            output_entry.insert(0, folder)
+
+    ctk.CTkButton(
+        out_path_frame,
+        text="浏览",
+        width=80,
+        command=out_browse_folder
+    ).pack(
+        side="right",
+        padx=10
+    )
 
     # ==========================
     # 整理模式
@@ -178,26 +217,26 @@ def create_organize_page(parent):
     # 选项
     # ==========================
 
-    option_frame = ctk.CTkFrame(frame)
+    # option_frame = ctk.CTkFrame(frame)
 
-    option_frame.pack(
-        fill="x",
-        padx=20,
-        pady=10
-    )
+    # option_frame.pack(
+    #     fill="x",
+    #     padx=20,
+    #     pady=10
+    # )
 
-    rename_var = ctk.BooleanVar(
-        value=True
-    )
+    # rename_var = ctk.BooleanVar(
+    #     value=True
+    # )
 
-    ctk.CTkCheckBox(
-        option_frame,
-        text="同名文件自动重命名",
-        variable=rename_var
-    ).pack(
-        side="left",
-        padx=10
-    )
+    # ctk.CTkCheckBox(
+    #     option_frame,
+    #     text="同名文件自动重命名",
+    #     variable=rename_var
+    # ).pack(
+    #     side="left",
+    #     padx=10
+    # )
 
     # ==========================
     # 状态
@@ -264,8 +303,9 @@ def create_organize_page(parent):
     def organize_worker():
 
         root_dir = music_entry.get()
+        out_dir = output_entry.get()
 
-        if not root_dir:
+        if not root_dir or not out_dir:
 
             log("❌ 请先选择目录")
             return
@@ -284,7 +324,7 @@ def create_organize_page(parent):
 
         operation = operation_var.get()
 
-        auto_rename = rename_var.get()
+        # auto_rename = rename_var.get()
 
         for idx, song in enumerate(songs):
 
@@ -292,24 +332,17 @@ def create_organize_page(parent):
 
                 src = song["path"]
 
-                artist = (
-                    song["artist"]
-                    or "未知歌手"
-                )
+                ext = src.split(".")[1]
+                title = song.get("title","未知歌曲")
+                artist = song.get("artist","未知歌手")
+                album = song.get("album","未知专辑")
 
-                album = (
-                    song["album"]
-                    or "未知专辑"
-                )
-
-                filename = os.path.basename(
-                    src
-                )
+                filename = f"{artist} - {title}.{ext}"
 
                 if mode == "歌手/专辑":
 
                     dst_dir = os.path.join(
-                        root_dir,
+                        out_dir,
                         artist,
                         album
                     )
@@ -317,14 +350,14 @@ def create_organize_page(parent):
                 elif mode == "歌手":
 
                     dst_dir = os.path.join(
-                        root_dir,
+                        out_dir,
                         artist
                     )
 
                 else:
 
                     dst_dir = os.path.join(
-                        root_dir,
+                        out_dir,
                         album
                     )
 
@@ -338,13 +371,11 @@ def create_organize_page(parent):
                     filename
                 )
 
-                if auto_rename:
+                # if auto_rename:
 
-                    dst = unique_path(dst)
+                #     dst = unique_path(dst)
 
-                if src == dst:
-
-                    continue
+                if src == dst: continue
 
                 if operation == "move":
 

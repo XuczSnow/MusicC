@@ -10,6 +10,9 @@ icon.png
 # innosetup
 # *.iss
 inno/
+cahce/
+logs/
+music_data/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

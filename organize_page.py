@@ -6,9 +6,10 @@ import customtkinter as ctk
 
 from tkinter import filedialog
 
-from load_music import load_music
+from script.load_music import *
+from script.logger import AppLogger
 
-__log = None
+logger = None
 
 def unique_path(path):
 
@@ -31,7 +32,7 @@ def unique_path(path):
 
 def create_organize_page(parent):
 
-    global __log
+    global logger
 
     frame = ctk.CTkFrame(parent)
 
@@ -281,20 +282,7 @@ def create_organize_page(parent):
         pady=10
     )
 
-    def log(msg):
-
-        frame.after(
-            0,
-            lambda: (
-                log_box.insert(
-                    "end",
-                    msg + "\n"
-                ),
-                log_box.see("end")
-            )
-        )
-
-    __log = log
+    logger = AppLogger(textbox=log_box)
 
     # ==========================
     # 整理逻辑
@@ -306,19 +294,16 @@ def create_organize_page(parent):
         out_dir = output_entry.get()
 
         if not root_dir or not out_dir:
-
-            log("❌ 请先选择目录")
+            logger.warning("请先选择目录\n")
             return
 
-        log("🔍 扫描音乐库...")
+        logger.info("扫描音乐库...")
 
         songs = load_music(root_dir)
 
         total = len(songs)
 
-        log(
-            f"✅ 共发现 {total} 首歌曲"
-        )
+        logger.info(f"    共发现 {total} 首歌曲\n")
 
         mode = organize_mode.get()
 
@@ -332,10 +317,11 @@ def create_organize_page(parent):
 
                 src = song["path"]
 
-                ext = src.split(".")[1]
+                ext = src.split(".")[-1]
                 title = song.get("title","未知歌曲")
                 artist = song.get("artist","未知歌手")
                 album = song.get("album","未知专辑")
+                print(f"整理: {artist} - {title} - {album}")
 
                 filename = f"{artist} - {title}.{ext}"
 
@@ -355,7 +341,7 @@ def create_organize_page(parent):
                     )
 
                 else:
-
+                    album = sanitize_filename(album)
                     dst_dir = os.path.join(
                         out_dir,
                         album
@@ -387,7 +373,7 @@ def create_organize_page(parent):
                     action = "移动"
 
                 else:
-
+                    print(f"复制: {src} -> {dst}")
                     shutil.copy2(
                         src,
                         dst
@@ -395,9 +381,7 @@ def create_organize_page(parent):
 
                     action = "复制"
 
-                log(
-                    f"✅ {action}: {filename}"
-                )
+                logger.info(f"    {action}: {filename}")
 
                 progress_value = (
                     idx + 1
@@ -419,9 +403,7 @@ def create_organize_page(parent):
 
             except Exception as e:
 
-                log(
-                    f"❌ {filename}: {e}"
-                )
+                logger.exception(e)
 
         frame.after(
             0,
@@ -431,8 +413,7 @@ def create_organize_page(parent):
             )
         )
 
-        log("")
-        log("🎉 整理完成")
+        logger.info("整理完成\n")
 
     # ==========================
     # 开始按钮
@@ -477,7 +458,7 @@ if __name__ == "__main__":
     net_frame = create_organize_page(app)
     net_frame.pack(fill="both", expand=True)
 
-    from start_service import *
+    from script.start_service import *
     import threading
 
     bottom_label = ctk.CTkLabel(
@@ -488,8 +469,7 @@ if __name__ == "__main__":
     bottom_label.pack(side="right")
 
     threading.Thread(
-        target=lambda: start_go_music_api(
-            lambda msg: app.after(0, __log, msg + "\n"), bottom_label),
+        target=lambda: start_go_music_api(logger, bottom_label),
         daemon=True
     ).start()
 

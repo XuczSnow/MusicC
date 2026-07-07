@@ -3,7 +3,7 @@
 ## 项目简介
 
 > 一个集 **本地音乐管理、AI 智能分类、网络歌单生成、元数据补全、音乐库整理** 于一体的桌面音乐管理工具。
-*基于 Python + AI(sentence-transformers) + CustomTkinter + go-music-api*
+*基于 Python + AI(sentence-transformers) + CustomTkinter + go-music-api，Vibe Coding*
 
 - 本地AI部署，智能本地音乐分类及权重推荐
 - 多平台歌单支持，自动匹配本地歌曲，多钟搜索配置

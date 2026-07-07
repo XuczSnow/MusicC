@@ -1,9 +1,7 @@
 import os
 import re
-from datetime import datetime
 
-from music_tag import *
-from cache_manager import JsonCache
+from script.music_tag import *
 
 from pathlib import Path
 from mutagen.easyid3 import EasyID3
@@ -12,38 +10,15 @@ from mutagen.mp3 import MP3
 
 from pathlib import Path
 
-# music_cache = JsonCache(
-#     cache_file=Path(__file__).parent / "cache" / "music_cache.json",
-#     expire_days=30
-# )
-
 songs = []
 global_path = ""
 
-def is_modified_before(filepath, target_time):
-    """
-    判断文件最后修改时间是否早于 target_time
-    
-    target_time 支持:
-    - datetime 对象（建议带时区）
-    - 时间戳（float/int，秒）
-    - 字符串（如 "2024-01-01 12:00:00"）
-    """
-    # 统一转换为时间戳
-    if isinstance(target_time, datetime):
-        # 带时区的 datetime
-        if target_time.tzinfo is not None:
-            target_ts = target_time.timestamp()
-        else:
-            # 无时区视为本地时间
-            target_ts = target_time.timestamp()
-    elif isinstance(target_time, str):
-        target_ts = datetime.strptime(target_time, "%Y-%m-%d %H:%M:%S").timestamp()
-    else:
-        target_ts = float(target_time)
-    
-    mtime = os.path.getmtime(filepath)
-    return mtime < target_ts
+def keep_newest(path_a, payh_b):
+
+    t1 = os.path.getmtime(path_a)
+    t2 = os.path.getmtime(payh_b)
+
+    return t1 > t2
 
 def sanitize_filename(name):
     # 替换非法字符

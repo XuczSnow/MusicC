@@ -8,9 +8,10 @@ import customtkinter as ctk
 from tkinter import filedialog
 from datetime import datetime
 
-from load_music import load_music
-from music_tag import *
-from music_fetcher import MusicFetcher
+from script.load_music import load_music
+from script.music_tag import *
+from script.music_fetcher import MusicFetcher
+from script.logger import AppLogger
 
 from mutagen.easyid3 import EasyID3
 from mutagen.flac import FLAC, Picture
@@ -21,65 +22,11 @@ from PIL import Image
 from io import BytesIO
 
 BASE_URL = "http://localhost:8080/api/v1/music"
-__log = None
+logger = None
 
 musicbrainzngs.set_useragent("MusicClassifier", "1.0")
 
-import base64
 import requests
-
-import base64
-import requests
-
-
-def get_kugou_lyrics(song_name):
-    r = requests.get(
-        "http://mobilecdn.kugou.com/api/v3/search/song",
-        params={
-            "format": "json",
-            "keyword": song_name,
-            "page": 1,
-            "pagesize": 1
-        }
-    )
-
-    song = r.json()["data"]["info"][0]
-
-    hash_value = song["hash"]
-    duration = song["duration"] * 1000
-
-    lyric_search = requests.get(
-        "http://lyrics.kugou.com/search",
-        params={
-            "ver": 1,
-            "man": "yes",
-            "client": "pc",
-            "hash": hash_value,
-            "duration": duration
-        }
-    ).json()
-
-    candidate = lyric_search["candidates"][0]
-
-    lyric = requests.get(
-        "http://lyrics.kugou.com/download",
-        params={
-            "ver": 1,
-            "client": "pc",
-            "id": candidate["id"],
-            "accesskey": candidate["accesskey"],
-            "fmt": "lrc",
-            "charset": "utf8"
-        }
-    ).json()
-
-    return base64.b64decode(
-        lyric["content"]
-    ).decode(
-        "utf-8",
-        errors="ignore"
-    )
-
 
 def get_publish_date_brainz(song, artist):
     result = musicbrainzngs.search_recordings(
@@ -152,8 +99,8 @@ def get_year_from_netease(title, artist):
 
         return best_year
 
-    except:
-        pass
+    except Exception as e:
+        logger.exception(e)
 
     return ''
 
@@ -169,75 +116,78 @@ def fetch_song_meta(title, artist="", plat="kugou", date_en = 1):
         s = brainz.build_song(title, artist)
         year = s.get("year")
         lyric = s.get("lyrics")
-        if lyric == "":
-            __log("⚠️ 未获取到歌词，kugou搜索")
-            lyric = get_kugou_lyrics(keyword)
         s["cover"] = s.get("cover_url")
     else:
-        r = requests.get(
-            f"{BASE_URL}/search",
-            params={
-                "keyword": keyword,
-                "page": 1,
-                "size": 1
-            },
-            timeout=5,
-            proxies={"http": None, "https": None},
-        )
+        try:
+            r = requests.get(
+                f"{BASE_URL}/search",
+                params={
+                    "keyword": keyword,
+                    "page": 1,
+                    "size": 1
+                },
+                timeout=5,
+                proxies={"http": None, "https": None},
+            )
 
-        data = r.json().get("data", [])
+            data = r.json().get("data", [])
 
-        songs = data.get("songs", [])
-        if not songs and isinstance(data.get("data"), dict):
-            songs = data["data"].get("songs", [])
+            songs = data.get("songs", [])
+            if not songs and isinstance(data.get("data"), dict):
+                songs = data["data"].get("songs", [])
 
-        if not songs:
-            return None
-        
-        s = {}
-
-        for song in songs:
-            if song["source"] == plat:
-                if song["name"] in title and song["artist"] in artist:
-                    s = song
-                    break
-        
-        if s == {}:
-            __log("⚠️ 对应平台未获取到信息，全平台搜索")
-            for song in songs:
-                if song["name"] in title and song["artist"] in artist:
-                    s = song
-                    break
-        
-        if s == {}: 
-            return None
-        
-        s["cover"] = s.get("cover").replace("240/","")
-        
-        song_id = s.get("id")
-        # platform = s.get("platform", "qq")
-
-        time.sleep(0.5)
-
-        lr = requests.get(
-            f"{BASE_URL}/lyric",
-            params={
-                "id": song_id,
-                "source": plat,
-            },
-            timeout=5,
-        )
-
-        lyric_data = lr.json()
-        if lyric_data.get("code") != 200:
-            lyric =  ""
-        else:
-            lyric = lyric_data["data"].get("lyric", "")
+            if not songs:
+                return None
             
-        if date_en:
-            year = get_year_from_netease(s.get("name", title), s.get("artist", artist))
-        print(year)
-    
+            s = {}
+
+            def str_verify(s1, s2):
+                return s1.lower() in s2.lower() or s2.lower() in s1.lower()
+
+            for song in songs:
+                if song["source"] == plat:
+                    if str_verify(song["name"], title) and str_verify(song["artist"], artist):
+                        s = song
+                        break
+            
+            if s == {}:
+                logger.warning("    对应平台未获取到信息，全平台搜索")
+                for song in songs:
+                    if str_verify(song["name"], title) and str_verify(song["artist"], artist):
+                        s = song
+                        break
+            
+            if s == {}: 
+                return None
+            
+            s["cover"] = s.get("cover").replace("240/","")
+            
+            song_id = s.get("id")
+            # platform = s.get("platform", "qq")
+
+            time.sleep(0.5)
+
+            lr = requests.get(
+                f"{BASE_URL}/lyric",
+                params={
+                    "id": song_id,
+                    "source": plat,
+                },
+                timeout=5,
+            )
+
+            lyric_data = lr.json()
+            if lyric_data.get("code") != 200:
+                lyric =  ""
+            else:
+                lyric = lyric_data["data"].get("lyric", "")
+                
+            if date_en:
+                year = get_year_from_netease(s.get("name", title), s.get("artist", artist))
+                
+        except Exception as e:
+            logger.exception(e)
+
     return {
         "title": "".join(s.get("name", title)),
         "artist": "".join(s.get("artist", artist)),
@@ -253,10 +203,11 @@ def download_cover(url):
     if not url:
         return None
 
-    # try:
-    return requests.get(url, timeout=15).content
-    # except Exception:
-    #     return None
+    try:
+        return requests.get(url, timeout=15).content
+    except Exception as e:
+        logger.exception(e)
+        return None
 
 def make_flac_picture(img, max_size: int = 800) -> Picture:
     """把任意图片转成 FLAC 能接受的 Picture 对象"""
@@ -288,23 +239,27 @@ def rewrite_songs(overwrite, path, meta, type, pixel=800):
 
     # 基础数据
     if overwrite or not audio.get("title"):
+        logger.info("    -> 源文件没有 title 或者覆盖")
         if meta["title"] != '':
-            __log(f"  -> 重写 title: {meta["title"]}")
+            logger.info(f"    -> 重写 title: {meta["title"]}")
             audio["title"] = meta["title"]
 
     if overwrite or not audio.get("artist"):
+        logger.info("    -> 源文件没有 artist 或者覆盖")
         if meta["artist"] != '':
-            __log(f"  -> 重写 artist: {meta["artist"]}")
+            logger.info(f"    -> 重写 artist: {meta["artist"]}")
             audio["artist"] = meta["artist"]
 
     if overwrite or not audio.get("album"):
+        logger.info("    -> 源文件没有 album 或者覆盖")
         if meta["album"] != '':
-            __log(f"  -> 重写 album: {meta["album"]}")
+            logger.info(f"    -> 重写 album: {meta["album"]}")
             audio["album"] = meta["album"]
 
     if overwrite or not audio.get("date"):
+        logger.info("    -> 源文件没有 date 或者覆盖")
         if meta["year"] != '':
-            __log(f"  -> 重写 date: {meta["year"]}")
+            logger.info(f"    -> 重写 date: {meta["year"]}")
             audio["date"] = meta["year"]
     
     audio.save()
@@ -312,43 +267,51 @@ def rewrite_songs(overwrite, path, meta, type, pixel=800):
         audio = MP3(path)
 
     #歌词
-    if meta.get("lyric") != "":
-        if type == "flac":
-            if overwrite or not audio.get("lyrics"):
-                __log(f"  -> 重写 lyric")
+
+    if type == "flac":
+        if overwrite or not audio.get("lyrics"):
+            logger.info("    -> 源文件没有 lyrics 或者覆盖")
+            if meta.get("lyric") != "":
+                logger.info(f"    -> 重写 lyric")
                 audio["lyrics"] = meta["lyric"]
-        elif type == "mp3":
-            if overwrite or not audio.tags.getall("USLT"):
+    elif type == "mp3":
+        if overwrite or not audio.tags.getall("USLT"):
+            logger.info("    -> 源文件没有 lyrics 或者覆盖")
+            if meta.get("lyric") != "":
                 audio.tags.delall("USLT")
-                __log(f"  -> 重写 lyric")
+                logger.info(f"    -> 重写 lyric")
                 audio.tags.add(USLT(encoding=3, text=meta["lyric"]))
     #封面
-    if meta.get("cover") != "":
-        cover = download_cover(meta.get("cover"))
-        if cover:
-            if type == "flac":
-                if overwrite or not audio.pictures:
-                    __log(f"  -> 加入封面图片")
+
+    if type == "flac":
+        if overwrite or not audio.pictures:
+            logger.info("    -> 源文件没有 cover 或者覆盖")
+            if meta.get("cover") != "":
+                cover = download_cover(meta.get("cover"))
+                if cover and "404" not in str(cover):
+                    logger.info("    -> 加入封面图片")
                     pic = make_flac_picture(BytesIO(cover), max_size=pixel)
                     audio.add_picture(pic)
-            elif type == "mp3":
+    elif type == "mp3":
+        if overwrite or not audio.tags.getall("APIC"):
+            logger.info(f"    -> 源文件没有 cover 或者覆盖")
+            if meta.get("cover") != "":
+                cover = download_cover(meta.get("cover"))
                 if cover:
-                    if overwrite or not audio.tags.getall("APIC"):
-                        __log(f"  -> 加入封面图片")
-                        audio.tags.add(APIC(
-                            encoding=3,
-                            mime="image/jpeg",
-                            type=3,
-                            desc="Cover",
-                            data=make_flac_picture(BytesIO(cover), max_size=pixel).data,
-                        ))
+                    logger.info(f"    -> 加入封面图片")
+                    audio.tags.add(APIC(
+                        encoding=3,
+                        mime="image/jpeg",
+                        type=3,
+                        desc="Cover",
+                        data=make_flac_picture(BytesIO(cover), max_size=pixel).data,
+                    ))
     audio.save()
     return audio
 
 def write_song_metadata(song, meta, pixel=800, overwrite=False):
     path = song["path"]
 
-    # try:
     if path.lower().endswith(".flac"):
         audio = rewrite_songs(overwrite, path, meta, "flac", pixel)
     elif path.lower().endswith(".mp3"):
@@ -357,12 +320,9 @@ def write_song_metadata(song, meta, pixel=800, overwrite=False):
         return f"不支持的文件类型: {path}"
 
     return True
-
-    # except Exception as e:
-    #     return str(e)
     
 def create_metadata_page(parent):
-    global __log
+    global logger
     
     frame = ctk.CTkFrame(parent)
 
@@ -433,13 +393,8 @@ def create_metadata_page(parent):
 
     log_box = ctk.CTkTextbox(frame)
     log_box.pack(fill="both", expand=True, padx=20, pady=10)
-
-    def log(msg):
-        frame.after(0, lambda: (
-            log_box.insert("end", msg + "\n"),
-            log_box.see("end")
-        ))
-    __log = log
+    
+    logger = AppLogger(textbox=log_box)
 
     def select_folder():
         folder = filedialog.askdirectory()
@@ -454,7 +409,7 @@ def create_metadata_page(parent):
         folder = path_entry.get().strip()
 
         if not folder:
-            log("❌ 请先选择目录")
+            logger.warning("请先选择目录\n")
             return
         
         btn.configure(state="disabled")
@@ -463,10 +418,10 @@ def create_metadata_page(parent):
         plat = platform_var.get()
         pixel = int(pixel_limit.get())
 
-        log("\n🔍 扫描音乐库...")
+        logger.info("扫描音乐库...")
         songs = load_music(folder)
 
-        log(f"✅ 共发现 {len(songs)} 首歌曲")
+        logger.info(f"共发现 {len(songs)} 首歌曲\n")
 
         total = len(songs)
         song_cnt = 0
@@ -481,7 +436,7 @@ def create_metadata_page(parent):
                 )
             )
 
-            log(f"\n🎵 {song['title']} - {song['artist']}")
+            logger.info(f"    {song['title']} - {song['artist']}")
 
             info_list = ["title",
                         "artist",
@@ -497,13 +452,13 @@ def create_metadata_page(parent):
                     break
 
             if all_info:
-                log("⚠️  跳过-歌曲信息完整")
+                logger.info("    跳过-歌曲信息完整\n")
                 continue
 
             meta = fetch_song_meta(song['title'], song['artist'], plat, date_en = 0 if song["year"] else 1)
 
             if not meta:
-                log("⚠️ 未获取到网络信息")
+                logger.warning("    未获取到网络信息\n")
                 continue
 
             result = write_song_metadata(
@@ -514,14 +469,12 @@ def create_metadata_page(parent):
             )
 
             if result is True:
-                log("✅ 更新成功")
-            else:
-                log(f"❌ 更新失败: {result}")
+                logger.info("    更新成功\n")
 
             song_cnt += 1
             time.sleep(1)
             if song_cnt%100 == 0:
-                log(f"⏳ 已网络处理 {song_cnt} 首歌曲，请等待10秒~")
+                logger.info(f"\n    已网络处理 {song_cnt} 首歌曲，请等待10秒~\n")
                 time.sleep(10)
 
         frame.after(
@@ -529,7 +482,7 @@ def create_metadata_page(parent):
             lambda: status_label.configure(text="状态：完成 ✅")
         )
 
-        log("🎉 所有歌曲处理完成")
+        logger.info("所有歌曲处理完成")
         btn.configure(state="enabled")
 
     btn = ctk.CTkButton(
@@ -690,7 +643,7 @@ if __name__ == "__main__":
     net_frame = create_metadata_page(app)
     net_frame.pack(fill="both", expand=True)
 
-    from start_service import *
+    from script.start_service import *
     import threading
 
     bottom_label = ctk.CTkLabel(
@@ -701,8 +654,7 @@ if __name__ == "__main__":
     bottom_label.pack(side="right")
 
     threading.Thread(
-        target=lambda: start_go_music_api(
-            lambda msg: app.after(0, __log, msg + "\n"), bottom_label),
+        target=lambda: start_go_music_api(logger, bottom_label),
         daemon=True
     ).start()
 

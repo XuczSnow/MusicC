@@ -8,11 +8,11 @@ import time
 
 from tkinter import filedialog
 
-from music_tag import *
-from load_music import *
+from script.music_tag import *
+from script.load_music import *
+from script.logger import AppLogger
 
-MUSIC_DIR = "./"
-__log = None
+logger = None
 
 # ================= 工具 =================
 def normalize(text):
@@ -74,14 +74,12 @@ def save_playlist_cover(
         return filepath
 
     except Exception as e:
-
         print(e)
-
         return None
 
 
 # ================= 平台实现 =================
-def get_netease_multi(keyword, list_limit=30, platform="all", log=None):
+def get_netease_multi(keyword, list_limit=30, platform="all"):
 
     BASE = "http://localhost:8080/api/v1"
 
@@ -101,9 +99,8 @@ def get_netease_multi(keyword, list_limit=30, platform="all", log=None):
         data = r.json().get("data",[])
         playlists = data.get("playlists", [])
 
-    except Exception:
-        if log:
-            log("❌ 搜索失败\n")
+    except Exception as e:
+        logger.exception(e)
         return []
 
     # ===== 2️⃣ 遍历歌单 =====
@@ -122,8 +119,7 @@ def get_netease_multi(keyword, list_limit=30, platform="all", log=None):
         if list_count == list_limit:
             break
 
-        if log:
-            log(f"\n🎧 {pname}\n")
+        logger.info(f"    {pname}")
 
         try:
             r2 = requests.get(
@@ -148,8 +144,7 @@ def get_netease_multi(keyword, list_limit=30, platform="all", log=None):
             ]
 
 
-            if log:
-                log(f"✅ 获取: {len(songs)} 首\n")
+            logger.info(f"    获取: {len(songs)} 首\n")
 
             result.append({
                 "name": pname,
@@ -159,8 +154,7 @@ def get_netease_multi(keyword, list_limit=30, platform="all", log=None):
             })
 
         except Exception as e:
-            if log:
-                log(f"❌ 获取失败: {e}\n")
+            logger.exception(e)
 
     return result
 
@@ -179,7 +173,7 @@ def save_playlist(name, songs, cover_url = ''):
     file_path = f"{path}/{name}/{name}.m3u"
     if cover_url != '':
         save_playlist_cover(name, cover_url, f"{path}/{name}")
-    __log(f"  ->生成:{file_path}\n")
+    logger.info(f"    ->生成:{file_path}")
 
     with open(file_path, "w", encoding="utf-8") as f:
 
@@ -198,9 +192,9 @@ def save_playlist(name, songs, cover_url = ''):
             f.write(f"#EXTINF:{duration},{artist} - {title}\n")
             f.write(s["path"] + "\n")
 
-def generate_netease_multi(keyword, songs, limit, platform = "all", min_limit=2, log=None):
+def generate_netease_multi(keyword, songs, limit, platform = "all", min_limit=2):
 
-    playlists = get_netease_multi(keyword, list_limit=limit, platform=platform, log=log)
+    playlists = get_netease_multi(keyword, list_limit=limit, platform=platform)
 
     index = build_local_index(songs)
 
@@ -209,29 +203,27 @@ def generate_netease_multi(keyword, songs, limit, platform = "all", min_limit=2,
         pname = p["name"]
         source = p["source"]
 
-        if log:
-            log(f"\n📀 处理歌单: {pname}\n")
+        logger.info(f"    处理歌单: {pname}")
 
         matched = match_local(p["songs"], index)
 
         if len(matched) < min_limit:
             if len(matched) == 0:
-                log(f"⚠️ 没有匹配到歌曲, 跳过\n")
+                logger.warning("    没有匹配到歌曲, 跳过\n")
             else:
-                log(f"⚠️ 匹配太少 ({len(matched)})，跳过\n")
+                logger.warning(f"    只匹配到({len(matched)})首歌曲，跳过\n")
             continue
 
         safe_name = pname.replace("/", "_")
 
         save_playlist(f"PL_{source}_{safe_name}", matched, p["cover"])
 
-        if log:
-            log(f"✅ 匹配: {len(matched)} / {len(p['songs'])}\n")
+        logger.info(f"    匹配: {len(matched)} / {len(p['songs'])}\n")
 
 # ================= 页面组件 =================
 
 def create_net_page(parent):
-    global __log
+    global logger
 
     # ===== 根 =====
     main_frame = ctk.CTkFrame(parent)
@@ -400,20 +392,11 @@ def create_net_page(parent):
 
     log_box = ctk.CTkTextbox(log_frame, height=200)
     log_box.pack(fill="both", expand=True, padx=10, pady=10)
+    logger = AppLogger(textbox=log_box)
 
     # ===== 下：按钮区（固定🔥）=====
     bottom_frame = ctk.CTkFrame(main_frame)
     bottom_frame.pack(pady=10, padx=20, fill="x")
-
-    def log(*args):
-        if len(args) == 1:
-            msg = args[0]
-        else:
-            msg = args[0]
-
-        log_box.insert("end", msg)
-        log_box.see("end")
-    __log = log
 
     # ----- 按钮 -----
     def run():
@@ -423,7 +406,7 @@ def create_net_page(parent):
         MUSIC_DIR = path_entry.get()
 
         if not MUSIC_DIR:
-            log("❌ 请先选择目录\n")
+            logger.warning("请先选择目录\n")
             return
     
         import threading
@@ -446,34 +429,32 @@ def create_net_page(parent):
 
                 if tag == "ALL":
 
-                    log(f"\n📂 批量生成: {group}\n")
+                    logger.info(f"批量生成: {group}")
 
                     for t, keywords in TAG_DEFINITIONS[group].items():
 
-                        log(f"\n👉 {t}\n")
+                        logger.info(f"  {t}")
 
                         generate_netease_multi(
                             keyword=keywords,
                             songs=songs,
                             limit=limit,
                             min_limit = min_hj,
-                            platform = platform,
-                            log=log
+                            platform = platform
                         )
 
                 else:
 
                     keywords = TAG_DEFINITIONS[group][tag]
 
-                    log(f"\n🎯 {group} - {tag}\n")
+                    logger.info(f"{group} - {tag}")
 
                     generate_netease_multi(
                         keyword=keywords,
                         songs=songs,
                         limit=limit,
                         min_limit = min_hj,
-                        platform = platform,
-                        log=log
+                        platform = platform
                     )
             # ================= 随机歌曲 =================
             elif mode_var.get() == "local":
@@ -493,19 +474,18 @@ def create_net_page(parent):
                     title = songs[idx]["title"]
                     artist = songs[idx]["artist"]
                     keywords = title + " " + artist
-                    log(f"\n📂 随机选择歌曲: {title} - {artist}\n")
+                    logger.info(f"随机选择歌曲: {title} - {artist}\n")
 
                     generate_netease_multi(
                         keyword=keywords,
                         songs=songs,
                         limit=10,
                         min_limit = min_hj,
-                        platform = platform,
-                        log=log
+                        platform = platform
                     )
 
                     if i%10 == 0:
-                        log(f"⏳ 已网络处理 {i*10} 个歌单，请等待10秒~")
+                        logger.info(f"    已网络处理 {i*10} 个歌单，请等待10秒~\n")
                         time.sleep(10)
             # ================= 自定义关键词 =================
             else:
@@ -513,10 +493,10 @@ def create_net_page(parent):
                 keyword = entry_keyword.get().strip()
 
                 if not keyword:
-                    log("❌ 请输入关键词\n")
+                    logger.warning("请输入关键词\n")
                     return
 
-                log(f"\n🔍 自定义搜索: {keyword}\n")
+                logger.info(f"自定义搜索: {keyword}")
 
                 generate_netease_multi(
                     keyword=keyword,
@@ -524,10 +504,9 @@ def create_net_page(parent):
                     limit=limit,
                     min_limit = min_hj,
                     platform = platform,
-                    log=log
                 )
 
-            log(f"\n✅ 生成完成\n")
+            logger.info("生成完成\n")
             btn.configure(state="enabled")
 
         threading.Thread(target=task).start()
@@ -561,7 +540,7 @@ if __name__ == "__main__":
     net_frame = create_net_page(app)
     net_frame.pack(fill="both", expand=True)
 
-    from start_service import *
+    from script.start_service import *
     import threading
 
     bottom_label = ctk.CTkLabel(
@@ -572,8 +551,7 @@ if __name__ == "__main__":
     bottom_label.pack(side="right")
 
     threading.Thread(
-        target=lambda: start_go_music_api(
-            lambda msg: app.after(0, __log, msg + "\n"), bottom_label),
+        target=lambda: start_go_music_api(logger, bottom_label),
         daemon=True
     ).start()
 

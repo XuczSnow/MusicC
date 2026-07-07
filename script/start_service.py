@@ -2,7 +2,8 @@ import subprocess
 import time
 import requests
 
-from music_tag import *
+from script.music_tag import *
+from script.logger import AppLogger
 
 api_process = None
 
@@ -10,7 +11,7 @@ _logger = print  # ✅ 默认用print
 
 def set_logger(func):
     global _logger
-    _logger = func
+    _logger = func.info
 
 def start_go_music_api(log = None, label = None):
 
@@ -23,13 +24,13 @@ def start_go_music_api(log = None, label = None):
         r = requests.get("http://localhost:8080/api/v1/system/cookies")
         print(r)
         if r.status_code == 200:
-            _logger("✅ go-music-api 已经运行")
+            _logger("go-music-api 已经运行")
             label.configure(text="API运行中")
             return
     except:
         pass
 
-    _logger("🚀 启动 go-music-api...")
+    _logger("启动 go-music-api...")
 
     startupinfo = subprocess.STARTUPINFO()
     startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
@@ -47,7 +48,7 @@ def start_go_music_api(log = None, label = None):
             r = requests.get("http://localhost:8080/api/v1/system/cookies")
             print(r)
             if r.status_code == 200:
-                _logger("✅ 启动成功")
+                _logger("启动成功")
                 label.configure(text="API运行中")
                 return
         except:
@@ -56,14 +57,14 @@ def start_go_music_api(log = None, label = None):
         time.sleep(1)
 
     label.configure(text="API未启动, 请重启软件")
-    _logger("❌ 启动失败")
+    _logger("启动失败")
 
 def stop_go_music_api():
 
     global api_process
 
     if api_process and api_process.poll() is None:
-        print("🛑 关闭 go-music-api...")
+        print("关闭 go-music-api...")
         api_process.terminate()   # ✅ 温和关闭
 
         try:
@@ -71,5 +72,5 @@ def stop_go_music_api():
         except:
             api_process.kill()  # ✅ 强制关闭（兜底）
 
-        print("✅ 已关闭")
+        print("已关闭")
 

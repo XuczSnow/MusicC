@@ -2,9 +2,11 @@
 import customtkinter as ctk
 import threading
 
-from start_service import *
+from script.start_service import *
 from tkinter import filedialog
-    
+
+from script.logger import AppLogger
+
 # ✅ 全局主题
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("green")
@@ -151,10 +153,9 @@ frame_log.pack(padx=20, pady=10, fill="both", expand=True)
 log_box = ctk.CTkTextbox(frame_log)
 log_box.pack(fill="both", expand=True, padx=10, pady=10)
 
-def log(msg):
-    log_box.insert("end", msg)
-    log_box.see("end")
-
+logger = AppLogger(textbox=log_box)
+logger.startup_info()
+    
 # ================= 状态 =================
 status_label = ctk.CTkLabel(main_tab, text="状态：空闲 ⏳")
 status_label.pack()
@@ -172,8 +173,7 @@ def initialize():
 
     # 启动API（后台）
     threading.Thread(
-        target=lambda: start_go_music_api(
-            lambda msg: app.after(0, log, msg + "\n"), bottom_label),
+        target=lambda: start_go_music_api(logger, bottom_label),
         daemon=True
     ).start()
 
@@ -197,49 +197,41 @@ def initialize():
 def run_task():
     global is_running
 
-    try:
-        folder = path_entry.get()
+    folder = path_entry.get()
 
-        if not folder:
-            main_tab.after(0, log, "❌ 请先选择目录\n")
-            return
+    if not folder:
+        logger.warning("请先选择目录\n")
+        return
 
-        # 先输出提示信息
-        main_tab.after(0, lambda: status_label.configure(text="状态：运行中 🚀"))
-        main_tab.after(0, log, "🚀 AI框架加载中...\n")
+    # 先输出提示信息
+    main_tab.after(0, lambda: status_label.configure(text="状态：运行中 🚀"))
 
-        from smart_music_classifier import run_classifier
+    from smart_music_classifier import run_classifier
 
-        run_classifier(
-            music_dir=folder,
+    run_classifier(
+        music_dir=folder,
 
-            use_ai=var_ai.get(),
-            use_net=var_net.get(),
-            use_artist=var_artist.get(),
-            use_era=var_era.get(),
+        use_ai=var_ai.get(),
+        use_net=var_net.get(),
+        use_artist=var_artist.get(),
+        use_era=var_era.get(),
 
-            ai_threshold=slider_ai.get(),
-            weight_ai=int(slider_weight_ai.get()),
-            weight_net=int(slider_weight_net.get()),
+        ai_threshold=slider_ai.get(),
+        weight_ai=int(slider_weight_ai.get()),
+        weight_net=int(slider_weight_net.get()),
 
-            max_sample=int(entry_sample.get()),
-            net_limit=int(entry_net_limit.get()),
+        max_sample=int(entry_sample.get()),
+        net_limit=int(entry_net_limit.get()),
 
-            log=lambda msg: app.after(0, log, msg+"\n")
-        )
+        log=logger
+    )
 
-        main_tab.after(0, log, "\n✅ 分类完成\n")
-        main_tab.after(0, lambda: status_label.configure(text="状态：完成 ✅"))
+    main_tab.after(0, lambda: status_label.configure(text="状态：完成 ✅"))
 
-    except Exception as e:
-        main_tab.after(0, log, f"\n❌ 错误: {e}\n")
-        main_tab.after(0, lambda: status_label.configure(text="状态：出错 ❌"))
+    is_running = False
 
-    finally:
-        is_running = False
-
-        # ✅ 恢复按钮（主线程）
-        main_tab.after(0, reset_button)
+    # ✅ 恢复按钮（主线程）
+    main_tab.after(0, reset_button)
 
 # ================= 按钮 =================
 

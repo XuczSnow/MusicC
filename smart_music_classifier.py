@@ -6,9 +6,10 @@ import requests
 
 from collections import defaultdict
 
-from music_tag import *
-from load_music import *
-from cache_manager import JsonCache
+from script.music_tag import *
+from script.load_music import *
+from script.cache_manager import JsonCache
+from script.logger import AppLogger
 
 from sklearn.metrics.pairwise import cosine_similarity
 
@@ -40,11 +41,11 @@ if len(sys.argv) > 1:
 # MAX_SAMPLE = 50
 
 # ===== 全局日志函数 =====
-_logger = print  # ✅ 默认用print
+logger = AppLogger()
 
 def set_logger(func):
-    global _logger
-    _logger = func
+    global logger
+    logger = func
 
 # ---------------- AI模型加载 ----------------
 model = None
@@ -78,7 +79,7 @@ def get_model():
     #     print(" ".join(map(str, text)))
 
     # tag_embeddings = tag_embeddings_mood | tag_embeddings_theme
-    _logger("    ✅ AI模型加载完成")
+    logger.info("    AI模型加载完成\n")
 
     return model
 
@@ -88,7 +89,8 @@ def year_tag(song):
 
     try:
         y = int(song["year"][:4])
-    except (ValueError, TypeError):
+    except Exception as e:
+        logger.exception(e)
         return ""
 
     if y == 0:
@@ -116,12 +118,11 @@ search_cnt = 0
 def wy_search(title, artist, album):
     global search_cnt
 
-    _logger("    ⏳在线分类中...")
     url = "http://localhost:8080/api/v1/music/search"
     results = []
 
     if search_cnt%20 == 0 and search_cnt != 0:
-        _logger(f"⏳ 已网络处理 {search_cnt} 首歌曲，请等待10秒~")
+        logger.info(f"    已网络处理 {search_cnt} 首歌曲，请等待10秒~\n")
         time.sleep(10)
     else:
         time.sleep(0.5)
@@ -160,8 +161,8 @@ def wy_search(title, artist, album):
                 results.append(p["name"])
             else:
                 break
-    except:
-        pass
+    except Exception as e:
+        logger.exception(e)
 
     return list(set(results))
 
@@ -183,7 +184,6 @@ def extract_tags(name):
 # ---------------- AI语义标签 ----------------
 def ai_tags(title, artist):
 
-    _logger("    ⏳AI分类中...")
     model = get_model()
 
     text = f"{title} {artist}"
@@ -202,7 +202,6 @@ def ai_tags(title, artist):
 
 def ai_tags_from_lyric(lyric):
 
-    _logger("    ⏳AI分类中...")
     model = get_model()
     if not lyric:
         return []
@@ -223,12 +222,13 @@ def ai_tags_from_lyric(lyric):
 # ---------------- 分类 ----------------
 def classify(songs):
 
-    _logger("\n⏳歌曲分类中...")
+    logger.info("歌曲分类中...")
     for s in songs[:MAX_SAMPLE]:
         keyword = f"{s['title']} {s['artist']}"
-        _logger("\n  分析:"+keyword)
+        logger.info("  分析:"+keyword)
 
         if USE_NET:
+            logger.info("    在线分类中...")
             names = wy_search(s['title'], s['artist'], s['album'])
 
             # ✅ 歌单标签
@@ -255,6 +255,7 @@ def classify(songs):
         if USE_AI:
             # ✅ AI标签
             # ai = ai_tags(s["title"], s["artist"])
+            logger.info("    AI分类中...")
             lyric = s["lyric"]
             ai = ai_tags_from_lyric(lyric)
 
@@ -264,18 +265,19 @@ def classify(songs):
 
         if USE_ERA:
             # ✅ 年代
+            logger.info("    年代分类中...\n")
             y = year_tag(s)
             if y:
                 s["tags"].append(y)
 
         # # ✅ 限制标签数量
         # s["tags"] = list(set(s["tags"]))[:5]
-    _logger("\n✅ 歌曲分析完成")
+    logger.info("歌曲分析完成\n")
     return songs
 
 # ---------------- 输出 ----------------
 def save(songs):
-    _logger("\n⏳生成歌单中...")
+    logger.info("生成歌单中...")
     grouped = defaultdict(list)
 
     # 存储缓存
@@ -300,8 +302,13 @@ def save(songs):
         file_dir = f"{path}/{tag_name}"
         os.makedirs(file_dir, exist_ok=True)
         file_path = f"{file_dir}/{tag_name}.m3u"
-
-        shutil.copy(resource_path("asset/cover.jpeg"), file_dir)
+        pic_name = tag_name.split('_')
+        pic_patch = resource_path(f"asset/{pic_name[1]} {pic_name[2]}.png")
+        
+        if os.path.exists(pic_patch):
+            shutil.copy(pic_patch, file_dir + "/cover.png")
+        else:
+            shutil.copy(resource_path("asset/cover.jpeg"), file_dir)
 
         with open(file_path, "w", encoding="utf-8") as f:
 
@@ -322,7 +329,7 @@ def save(songs):
                 f.write(f"#EXTINF:{duration},{artist} - {title}\n")
                 f.write(s["path"] + "\n")
 
-        _logger("  ->生成:"+file_path)
+        logger.info("  ->生成:"+file_path)
 
     # ✅ DailyMix
     ranked = sorted(songs, key=lambda x: x["score"], reverse=True)
@@ -359,7 +366,7 @@ def run_classifier(
     weight_net=1,
     max_sample=1000,
     net_limit=30,
-    log=print   # ✅ 接收GUI日志函数
+    log=None   # ✅ 接收GUI日志函数
 ):
     global MUSIC_DIR
     global USE_AI
@@ -386,13 +393,12 @@ def run_classifier(
     set_logger(log)
 
     songs = load_music(MUSIC_DIR)
-    _logger("✅ 本地歌曲:" + str(len(songs)))
+    logger.info(f"本地歌曲:{len(songs)}\n")
 
     songs = classify(songs)
     save(songs)
 
-    if log:
-        log("\n✅ 分类完成")
+    logger.info("分类完成")
 
 if __name__ == "__main__":
     run_classifier(MUSIC_DIR)

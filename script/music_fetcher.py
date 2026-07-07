@@ -11,9 +11,8 @@ musicbrainzngs.set_useragent("MusicClassifier", "1.0.2")
 
 class MusicFetcher:
 
-    def __init__(self, save_dir="music_data"):
-        self.save_dir = Path(save_dir)
-        self.save_dir.mkdir(exist_ok=True)
+    def __init__(self):
+        pass
 
     def search_song(self, title, artist):
         """
@@ -99,19 +98,22 @@ class MusicFetcher:
 
         print(f"Searching: {artist} - {title}")
 
-        recording = self.search_song(title, artist)
+        release_id = None
+        lyrics_data = None
+        cover_url = None
 
-        if not recording:
-            return None
+        try:
+            recording = self.search_song(title, artist)
 
-        release_id = self.get_release_id(recording)
+            if not recording:
+                return None
 
-        cover_url = self.get_cover_url(release_id)
-
-        lyrics_data = self.get_lyrics(
-            title,
-            artist
-        )
+            release_id = self.get_release_id(recording)
+            cover_url = self.get_cover_url(release_id)
+            lyrics_data = self.get_lyrics(title, artist)
+            
+        except Exception as e:
+            print(f"\n错误: {e}\n")
 
         song_data = {
             "title": recording.get("title"),
@@ -162,8 +164,9 @@ class MusicFetcher:
 
         return song_data
 
-    def save_song(self, song):
-
+    def save_song(self, song, save_dir="music_data"):
+        self.save_dir = Path(save_dir)
+        self.save_dir.mkdir(exist_ok=True)
         safe_name = (
             f"{song['artist']}"
             f" - "

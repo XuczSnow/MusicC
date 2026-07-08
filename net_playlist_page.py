@@ -74,7 +74,7 @@ def save_playlist_cover(
         return filepath
 
     except Exception as e:
-        print(e)
+        logger.exception(e)
         return None
 
 
@@ -414,7 +414,7 @@ def create_net_page(parent):
         def task():
             btn.configure(state="disabled")
 
-            songs = load_music(MUSIC_DIR)
+            songs = load_music(MUSIC_DIR, log=logger)
             
             limit = int(entry_limit.get())
             min_hj = int(min_limit.get())

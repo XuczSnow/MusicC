@@ -3,7 +3,6 @@ import time
 import requests
 
 from script.music_tag import *
-from script.logger import AppLogger
 
 api_process = None
 

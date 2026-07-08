@@ -1,0 +1,67 @@
+{"id": "63f1434b-87cd-4386-90da-45ed403c80b5", "ext:score": "100", "title": "美麗的神話Ⅰ", "length": "290333", "artist-credit": [
+        {"name": "成龍", "artist": {"id": "283f3d8b-f210-473e-9182-8b37c3e97984", "name": "成龍", "sort-name": "Chan, Jackie", "alias-list": [
+                    {"locale": "zh_Hans_CN", "sort-name": "成龙", "type": "Artist name", "primary": "primary", "alias": "成龙"
+                    },
+                    {"locale": "zh_Hant", "sort-name": "成龍", "type": "Artist name", "primary": "primary", "alias": "成龍"
+                    },
+                    {"sort-name": "Chan, Jackie", "type": "Artist name", "alias": "Jackie Chan"
+                    },
+                    {"sort-name": "Jacky Chan", "type": "Search hint", "alias": "Jacky Chan"
+                    },
+                    {"sort-name": "Chan Gong Sang", "type": "Search hint", "alias": "Chan Gong Sang"
+                    },
+                    {"locale": "zh_Hans", "sort-name": "成龙", "type": "Artist name", "primary": "primary", "alias": "成龙"
+                    },
+                    {"locale": "zh_HK", "sort-name": "陳港生", "type": "Legal name", "begin-date": "1954-04-07", "alias": "陳港生"
+                    }
+                ]
+            }
+        }, " & ",
+        {"name": "金喜善", "artist": {"id": "1c70d797-2713-45b3-8c8e-27d191ccee9c", "name": "김희선", "sort-name": "Kim, Hee-sun", "disambiguation": "South Korean actress", "alias-list": [
+                    {"locale": "zh", "sort-name": "金喜善", "type": "Artist name", "primary": "primary", "alias": "金喜善"
+                    }
+                ]
+            }
+        }
+    ], "release-list": [
+        {"id": "d22b65d1-a833-4f98-97dc-533d3354ca52", "title": "The Myth", "status": "Pseudo-Release", "artist-credit": [
+                {"name": "Nathan Wang", "artist": {"id": "ba04e393-fe3f-41dd-8a13-dfb24228f481", "name": "Nathan Wang", "sort-name": "Wang, Nathan", "disambiguation": "Chinese‐American pianist and composer"
+                    }
+                }, " & ",
+                {"name": "Gary Chase", "artist": {"id": "4af313e9-b662-41cb-9105-bde24c59e6c6", "name": "Gary Chase", "sort-name": "Chase, Gary"
+                    }
+                }
+            ], "release-group": {"id": "c3d7f860-fefc-3b75-ae25-6def48691a22", "type": "Soundtrack", "title": "神話", "primary-type": "Album", "secondary-type-list": ["Soundtrack"
+                ]
+            }, "medium-list": [
+                {"position": "1", "track-list": [
+                        {"id": "4a2ec8fe-3f97-3359-b680-27363d313427", "number": "2", "title": "Endless Love I", "length": "290333", "track_or_recording_length": "290333"
+                        }
+                    ], "track-count": 19
+                }
+            ], "medium-track-count": 19, "medium-count": 1, "artist-credit-phrase": "Nathan Wang & Gary Chase"
+        },
+        {"id": "7079f26e-0b83-43b1-9f4d-0637d82f7906", "title": "神話", "status": "Official", "artist-credit": [
+                {"name": "Nathan Wang", "artist": {"id": "ba04e393-fe3f-41dd-8a13-dfb24228f481", "name": "Nathan Wang", "sort-name": "Wang, Nathan", "disambiguation": "Chinese‐American pianist and composer"
+                    }
+                }, " & ",
+                {"name": "Gary Chase", "artist": {"id": "4af313e9-b662-41cb-9105-bde24c59e6c6", "name": "Gary Chase", "sort-name": "Chase, Gary"
+                    }
+                }
+            ], "release-group": {"id": "c3d7f860-fefc-3b75-ae25-6def48691a22", "type": "Soundtrack", "title": "神話", "primary-type": "Album", "secondary-type-list": ["Soundtrack"
+                ]
+            }, "date": "2005-09-23", "country": "TW", "release-event-list": [
+                {"date": "2005-09-23", "area": {"id": "41637cec-9a4f-389c-86d2-fc6abf3357b5", "name": "Taiwan", "sort-name": "Taiwan", "iso-3166-1-code-list": ["TW"
+                        ]
+                    }
+                }
+            ], "medium-list": [
+                {"position": "1", "format": "CD", "track-list": [
+                        {"id": "df2de8b4-36e8-344f-9183-eae661786d0c", "number": "2", "title": "美麗的神話Ⅰ", "length": "291000", "track_or_recording_length": "291000"
+                        }
+                    ], "track-count": 19
+                }
+            ], "medium-track-count": 19, "medium-count": 1, "artist-credit-phrase": "Nathan Wang & Gary Chase"
+        }
+    ], "artist-credit-phrase": "成龍 & 金喜善"
+}

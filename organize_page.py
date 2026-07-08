@@ -299,7 +299,7 @@ def create_organize_page(parent):
 
         logger.info("扫描音乐库...")
 
-        songs = load_music(root_dir)
+        songs = load_music(root_dir, log=logger)
 
         total = len(songs)
 
@@ -321,7 +321,7 @@ def create_organize_page(parent):
                 title = song.get("title","未知歌曲")
                 artist = song.get("artist","未知歌手")
                 album = song.get("album","未知专辑")
-                print(f"整理: {artist} - {title} - {album}")
+                # print(f"整理: {artist} - {title} - {album}")
 
                 filename = f"{artist} - {title}.{ext}"
 
@@ -329,7 +329,7 @@ def create_organize_page(parent):
 
                     dst_dir = os.path.join(
                         out_dir,
-                        artist,
+                        artist.split(" ")[0],
                         album
                     )
 
@@ -337,11 +337,11 @@ def create_organize_page(parent):
 
                     dst_dir = os.path.join(
                         out_dir,
-                        artist
+                        artist.split(" ")[0]
                     )
 
                 else:
-                    album = sanitize_filename(album)
+                    album = album
                     dst_dir = os.path.join(
                         out_dir,
                         album
@@ -373,7 +373,7 @@ def create_organize_page(parent):
                     action = "移动"
 
                 else:
-                    print(f"复制: {src} -> {dst}")
+                    # print(f"复制: {src} -> {dst}")
                     shutil.copy2(
                         src,
                         dst

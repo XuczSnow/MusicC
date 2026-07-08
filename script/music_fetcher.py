@@ -1,30 +1,41 @@
 import json
-import os
 from pathlib import Path
 
 import requests
 import musicbrainzngs
 
+from script.logger import AppLogger
 
 # MusicBrainz要求设置UA
 musicbrainzngs.set_useragent("MusicClassifier", "1.0.2")
 
 class MusicFetcher:
 
-    def __init__(self):
-        pass
+    def __init__(self, log=None):
+        if log:
+            self.logger=log
+        else:
+            self.logger=AppLogger()
+    
+    def set_logger(self, log):
+        if log:
+            self.logger=log     
 
     def search_song(self, title, artist):
         """
         MusicBrainz搜索歌曲
         """
-        result = musicbrainzngs.search_recordings(
-            recording=title,
-            artist=artist,
-            limit=1
-        )
+        try:
+            result = musicbrainzngs.search_recordings(
+                recording=title,
+                artist=artist,
+                limit=1
+            )
 
-        if not result["recording-list"]:
+            if not result["recording-list"]:
+                return None
+        except Exception as e:
+            self.logger.exception(e)
             return None
 
         return result["recording-list"][0]
@@ -61,28 +72,32 @@ class MusicFetcher:
                 return True
 
         except Exception as e:
-            print(e)
+            self.logger.exception(e)
 
         return False
 
     def get_lyrics(self, title, artist):
-
-        search = requests.get(
-            "https://lrclib.net/api/search",
-            params={
-                "track_name": title,
-                "artist_name": artist
-            },
-            timeout=20
-        )
         
+        try:
+            search = requests.get(
+                "https://lrclib.net/api/search",
+                params={
+                    "track_name": title,
+                    "artist_name": artist
+                },
+                timeout=20
+            )
+            
 
-        if search.status_code != 200:
-            return None
+            if search.status_code != 200:
+                return None
 
-        results = search.json()
+            results = search.json()
 
-        if not results:
+            if not results:
+                return None
+        except Exception as e:
+            self.logger.exception(e)
             return None
 
         best = results[0]
@@ -102,22 +117,19 @@ class MusicFetcher:
         lyrics_data = None
         cover_url = None
 
-        try:
-            recording = self.search_song(title, artist)
+        recording = self.search_song(title, artist)
 
-            if not recording:
-                return None
+        if not recording:
+            return None
 
-            release_id = self.get_release_id(recording)
-            cover_url = self.get_cover_url(release_id)
-            lyrics_data = self.get_lyrics(title, artist)
-            
-        except Exception as e:
-            print(f"\n错误: {e}\n")
+        release_id = self.get_release_id(recording)
+        cover_url = self.get_cover_url(release_id)
+        lyrics_data = self.get_lyrics(title, artist)
 
+        # print(recording.get("artist-credit-phrase"))
         song_data = {
             "title": recording.get("title"),
-            "artist": artist,
+            "artist": recording.get("artist-credit-phrase"),
             "musicbrainz_id": recording.get("id"),
             "release_id": release_id,
             "album": "",
@@ -134,17 +146,10 @@ class MusicFetcher:
 
         if release_list:
 
-            release = release_list[0]
-
-            song_data["album"] = release.get(
-                "title",
-                ""
-            )
-
-            song_data["year"] = release.get(
-                "date",
-                ""
-            )
+            for release in release_list:
+                if song_data["album"] == "" or song_data["year"] == "":
+                    song_data["album"] = release.get("title","")
+                    song_data["year"] = release.get("date","")
 
         if lyrics_data:
 

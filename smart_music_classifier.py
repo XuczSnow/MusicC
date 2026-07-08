@@ -155,12 +155,13 @@ def wy_search(title, artist, album):
             data = r.json().get("data",[])
             AlbumSLCache.set(album, data)
         plylist = data.get("playlists",[])
-        plylist = sorted(plylist, key=lambda x: x["play_count"], reverse=True)
-        for p in plylist[:NET_LIMIT]:
-            if p.get("play_count", 0) > 10000:
-                results.append(p["name"])
-            else:
-                break
+        if plylist:
+            plylist = sorted(plylist, key=lambda x: x["play_count"], reverse=True)
+            for p in plylist[:NET_LIMIT]:
+                if p.get("play_count", 0) > 10000:
+                    results.append(p["name"])
+                else:
+                    break
     except Exception as e:
         logger.exception(e)
 
@@ -390,9 +391,10 @@ def run_classifier(
     MAX_SAMPLE = max_sample
     NET_LIMIT = net_limit
 
-    set_logger(log)
+    if log:
+        set_logger(log)
 
-    songs = load_music(MUSIC_DIR)
+    songs = load_music(MUSIC_DIR, log=logger)
     logger.info(f"本地歌曲:{len(songs)}\n")
 
     songs = classify(songs)

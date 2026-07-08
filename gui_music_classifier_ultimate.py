@@ -200,6 +200,8 @@ def run_task():
     folder = path_entry.get()
 
     if not folder:
+        is_running = False
+        main_tab.after(0, reset_button)
         logger.warning("请先选择目录\n")
         return
 

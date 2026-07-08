@@ -8,7 +8,7 @@ import customtkinter as ctk
 from tkinter import filedialog
 from datetime import datetime
 
-from script.load_music import load_music
+from script.load_music import *
 from script.music_tag import *
 from script.music_fetcher import MusicFetcher
 from script.logger import AppLogger
@@ -23,37 +23,6 @@ from io import BytesIO
 
 BASE_URL = "http://localhost:8080/api/v1/music"
 logger = None
-
-musicbrainzngs.set_useragent("MusicClassifier", "1.0")
-
-import requests
-
-def get_publish_date_brainz(song, artist):
-    result = musicbrainzngs.search_recordings(
-        recording=song,
-        artist=artist,
-        limit=1
-    )
-
-    if not result["recording-list"]:
-        return None
-
-    recording_id = result["recording-list"][0]["id"]
-
-    data = musicbrainzngs.get_recording_by_id(
-        recording_id,
-        includes=["releases"]
-    )
-
-    dates = []
-
-    for release in data["recording"]["release-list"]:
-        date = release.get("date")
-
-        if date:
-            dates.append(date)
-
-    return min(dates) if dates else None
 
 HEADERS = {
     "Referer": "http://music.163.com",
@@ -104,16 +73,19 @@ def get_year_from_netease(title, artist):
 
     return ''
 
+brainz = MusicFetcher(logger)
+
 def fetch_song_meta(title, artist="", plat="kugou", date_en = 1):
   
     keyword = f"{title} {artist}".strip()
     
-    brainz = MusicFetcher()
     lyric = ""
     year = ""
     
     if plat == "brainz":
         s = brainz.build_song(title, artist)
+        if not s:
+            return None
         year = s.get("year")
         lyric = s.get("lyrics")
         s["cover"] = s.get("cover_url")
@@ -146,19 +118,24 @@ def fetch_song_meta(title, artist="", plat="kugou", date_en = 1):
 
             for song in songs:
                 if song["source"] == plat:
-                    if str_verify(song["name"], title) and str_verify(song["artist"], artist):
+                    s_artists = split_artists(song["artist"])
+                    s_name = song["name"]
+                    if str_verify(s_name, title) and str_verify(s_artists[0], artist):
                         s = song
                         break
             
             if s == {}:
                 logger.warning("    对应平台未获取到信息，全平台搜索")
                 for song in songs:
-                    if str_verify(song["name"], title) and str_verify(song["artist"], artist):
+                    s_artists = split_artists(song["artist"])
+                    s_name = song["name"]
+                    if str_verify(s_name, title) and str_verify(s_artists[0], artist):
                         s = song
                         break
             
             if s == {}: 
                 return None
+            
             
             s["cover"] = s.get("cover").replace("240/","")
             
@@ -189,11 +166,11 @@ def fetch_song_meta(title, artist="", plat="kugou", date_en = 1):
             logger.exception(e)
 
     return {
-        "title": "".join(s.get("name", title)),
-        "artist": "".join(s.get("artist", artist)),
-        "album": "".join(s.get("album", "")),
+        "title": s.get("name", ""),
+        "artist": split_artists(s.get("artist", "")),
+        "album": s.get("album", ""),
         "cover": s.get("cover"),
-        "year": "".join(year),
+        "year": year,
         "lyric": lyric,
     }
 
@@ -239,62 +216,70 @@ def rewrite_songs(overwrite, path, meta, type, pixel=800):
 
     # 基础数据
     if overwrite or not audio.get("title"):
-        logger.info("    -> 源文件没有 title 或者覆盖")
         if meta["title"] != '':
             logger.info(f"    -> 重写 title: {meta["title"]}")
             audio["title"] = meta["title"]
+        else:
+            logger.info("    -> 没有获取到 title")
+            
 
     if overwrite or not audio.get("artist"):
-        logger.info("    -> 源文件没有 artist 或者覆盖")
         if meta["artist"] != '':
             logger.info(f"    -> 重写 artist: {meta["artist"]}")
             audio["artist"] = meta["artist"]
+        else:
+            logger.info("    -> 没有获取到 artist")
 
     if overwrite or not audio.get("album"):
-        logger.info("    -> 源文件没有 album 或者覆盖")
         if meta["album"] != '':
             logger.info(f"    -> 重写 album: {meta["album"]}")
             audio["album"] = meta["album"]
+        else:
+            logger.info("    -> 没有获取到 album")
 
     if overwrite or not audio.get("date"):
-        logger.info("    -> 源文件没有 date 或者覆盖")
         if meta["year"] != '':
             logger.info(f"    -> 重写 date: {meta["year"]}")
             audio["date"] = meta["year"]
+        else:
+            logger.info("    -> 没有获取到 date")        
     
     audio.save()
     if type == "mp3":
         audio = MP3(path)
 
     #歌词
-
     if type == "flac":
         if overwrite or not audio.get("lyrics"):
-            logger.info("    -> 源文件没有 lyrics 或者覆盖")
             if meta.get("lyric") != "":
                 logger.info(f"    -> 重写 lyric")
                 audio["lyrics"] = meta["lyric"]
+            else:
+                logger.info("    -> 没有获取到 lyric")
     elif type == "mp3":
         if overwrite or not audio.tags.getall("USLT"):
-            logger.info("    -> 源文件没有 lyrics 或者覆盖")
             if meta.get("lyric") != "":
                 audio.tags.delall("USLT")
                 logger.info(f"    -> 重写 lyric")
                 audio.tags.add(USLT(encoding=3, text=meta["lyric"]))
+            else:
+                logger.info("    -> 没有获取到 lyric")
+                
     #封面
-
     if type == "flac":
         if overwrite or not audio.pictures:
-            logger.info("    -> 源文件没有 cover 或者覆盖")
             if meta.get("cover") != "":
                 cover = download_cover(meta.get("cover"))
                 if cover and "404" not in str(cover):
                     logger.info("    -> 加入封面图片")
                     pic = make_flac_picture(BytesIO(cover), max_size=pixel)
                     audio.add_picture(pic)
+                else:
+                    logger.info("    -> 没有获取到 封面")
+            else:
+                logger.info("    -> 没有获取到 封面")
     elif type == "mp3":
         if overwrite or not audio.tags.getall("APIC"):
-            logger.info(f"    -> 源文件没有 cover 或者覆盖")
             if meta.get("cover") != "":
                 cover = download_cover(meta.get("cover"))
                 if cover:
@@ -306,6 +291,10 @@ def rewrite_songs(overwrite, path, meta, type, pixel=800):
                         desc="Cover",
                         data=make_flac_picture(BytesIO(cover), max_size=pixel).data,
                     ))
+                else:
+                    logger.info("    -> 没有获取到 封面")
+            else:
+                logger.info("    -> 没有获取到 封面")
     audio.save()
     return audio
 
@@ -419,7 +408,7 @@ def create_metadata_page(parent):
         pixel = int(pixel_limit.get())
 
         logger.info("扫描音乐库...")
-        songs = load_music(folder)
+        songs = load_music(folder, log=logger)
 
         logger.info(f"共发现 {len(songs)} 首歌曲\n")
 
@@ -436,7 +425,7 @@ def create_metadata_page(parent):
                 )
             )
 
-            logger.info(f"    {song['title']} - {song['artist']}")
+            logger.info(f"    {song['artist']} - {song['title']}")
 
             info_list = ["title",
                         "artist",
@@ -451,7 +440,7 @@ def create_metadata_page(parent):
                     all_info = False
                     break
 
-            if all_info:
+            if all_info and not overwrite:
                 logger.info("    跳过-歌曲信息完整\n")
                 continue
 
@@ -482,7 +471,8 @@ def create_metadata_page(parent):
             lambda: status_label.configure(text="状态：完成 ✅")
         )
 
-        logger.info("所有歌曲处理完成")
+        logger.info("所有歌曲处理完成, 重新载入歌曲\n")
+        load_music(folder, log=logger, reload=True)
         btn.configure(state="enabled")
 
     btn = ctk.CTkButton(

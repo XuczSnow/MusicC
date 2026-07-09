@@ -3,11 +3,6 @@
 # ===============================
 import sys, os
 
-def resource_path(relative_path):
-    if hasattr(sys, '_MEIPASS'):
-        return os.path.join(sys._MEIPASS, relative_path)
-    return os.path.join(os.path.abspath("."), relative_path)
-
 TAG_DEFINITIONS = {
 
     # ========= 情绪（Mood） =========
@@ -16,7 +11,7 @@ TAG_DEFINITIONS = {
         "💔_孤独": ["孤独", "loneliness", "alone", "空虚"],
         "😢_悲伤": ["悲伤", "难过", "哭", "sad"],
         "😌_治愈": ["治愈", "温柔", "安静", "relax"],
-        "😊_开心": ["开心", "快乐", "happy"],
+        "😊_开心": ["开心", "快乐", "happy", "愉悦"],
         "🔥_热血": ["热血", "燃", "battle", "激昂"],
         "😎_酷": ["酷", "swagger", "酷炫"],
     },
@@ -65,7 +60,7 @@ TAG_DEFINITIONS = {
     # ========= 属性 / 热度（Meta） =========
     "meta": {
         "📈_热门": ["热门", "热歌", "top", "榜单"],
-        "🏆_经典": ["经典", "名曲"],
+        "🏆_经典": ["经典", "名曲", "老歌"],
         # "🎵_翻唱": ["翻唱", "cover"],
         "🧊_小众": ["小众", "冷门"],
     },
@@ -249,6 +244,4 @@ MUSIC_PLATFARM = ["all", "netease",
                 "fivesing",
                 "jamendo",
                 "joox"]
-
-REMOVE_TEXT = "DJ"
 

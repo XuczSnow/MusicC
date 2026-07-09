@@ -5,7 +5,7 @@ a = Analysis(
     ['gui_music_classifier_ultimate.py'],
     pathex=[],
     binaries=[],
-    datas=[('bin', 'bin'), ('models', 'models'), ('asset', 'asset')],
+    datas=[('bin', 'bin'), ('models', 'models'), ('assets', 'assets')],
     hiddenimports=[
         # PIL 核心
         'PIL',
@@ -34,7 +34,7 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
-    console=False,
+    console=True,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,

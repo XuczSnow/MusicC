@@ -33,24 +33,28 @@ main_tab = tabview.add("本地分类")
 net_tab = tabview.add("平台歌单")
 meta_tab = tabview.add("元数据增强")
 organize_tab = tabview.add("音乐整理")
+about_tab = tabview.add("关于软件")
 
 def load_net_page():
-
     from net_playlist_page import create_net_page
-
     net_frame = create_net_page(net_tab)
     net_frame.pack(fill="both", expand=True)
 
 def load_mate_page():
     from metadata_page import create_metadata_page
-    net_frame = create_metadata_page(meta_tab)
-    net_frame.pack(fill="both", expand=True)
+    mate_frame = create_metadata_page(meta_tab)
+    mate_frame.pack(fill="both", expand=True)
 
 def load_ori_page():
     from organize_page import create_organize_page
+    ori_frame = create_organize_page(organize_tab)
+    ori_frame.pack(fill="both", expand=True)
+    
+def load_aboout_page():
+    from about_page import create_about_page
+    about_frame = create_about_page(about_tab)
+    about_frame.pack(fill="both", expand=True)
 
-    net_frame = create_organize_page(organize_tab)
-    net_frame.pack(fill="both", expand=True)
 
 # ================= 路径选择 =================
 frame_path = ctk.CTkFrame(main_tab)
@@ -169,6 +173,41 @@ bottom_label = ctk.CTkLabel(
 
 bottom_label.pack(side="right")
 
+import webbrowser
+import customtkinter as ctk
+
+def open_url(event=None):
+    webbrowser.open_new_tab("https://www.aliyun.com/minisite/goods?userCode=0resrw6k")
+
+ad_link = ctk.CTkLabel(
+    app,
+    text="🔗 阿里云专属优惠",
+    text_color="#4EA1FF",
+    cursor="hand2"
+)
+
+ad_link.pack(
+    side="left",
+)
+
+ad_link.bind(
+    "<Button-1>",
+    open_url
+)
+
+# def on_enter(event):
+#     event.widget.configure(
+#         text_color="#66CCFF"
+#     )
+
+# def on_leave(event):
+#     event.widget.configure(
+#         text_color="#4EA1FF"
+#     )
+
+# ad_link.bind("<Enter>", on_enter)
+# ad_link.bind("<Leave>", on_leave)
+
 def initialize():
 
     # 启动API（后台）
@@ -191,6 +230,10 @@ def initialize():
     app.after(
         500,
         load_ori_page
+    )
+    app.after(
+        500,
+        load_aboout_page
     )
 
 # ================= 运行 =================

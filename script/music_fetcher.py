@@ -5,6 +5,7 @@ import requests
 import musicbrainzngs
 
 from script.logger import AppLogger
+from script.load_music import *
 
 # MusicBrainz要求设置UA
 musicbrainzngs.set_useragent("MusicClassifier", "1.0.2")
@@ -128,8 +129,8 @@ class MusicFetcher:
 
         # print(recording.get("artist-credit-phrase"))
         song_data = {
-            "title": recording.get("title"),
-            "artist": recording.get("artist-credit-phrase"),
+            "title": to_simplified(recording.get("title")),
+            "artist": to_simplified(recording.get("artist-credit-phrase")),
             "musicbrainz_id": recording.get("id"),
             "release_id": release_id,
             "album": "",
@@ -148,7 +149,7 @@ class MusicFetcher:
 
             for release in release_list:
                 if song_data["album"] == "" or song_data["year"] == "":
-                    song_data["album"] = release.get("title","")
+                    song_data["album"] = to_simplified(release.get("title",""))
                     song_data["year"] = release.get("date","")
 
         if lyrics_data:

@@ -11,6 +11,7 @@ from tkinter import filedialog
 from script.music_tag import *
 from script.load_music import *
 from script.logger import AppLogger
+from script.cache_manager import JsonCache
 
 logger = None
 
@@ -77,9 +78,13 @@ def save_playlist_cover(
         logger.exception(e)
         return None
 
+KeySLCache = JsonCache("cahce/songlist_cache_key.json")
+SonglistCache = JsonCache("cahce/songlist_cache.json", expire_days=100)
+search_cnt = 0
 
 # ================= 平台实现 =================
 def get_netease_multi(keyword, list_limit=30, platform="all"):
+    global search_cnt
 
     BASE = "http://localhost:8080/api/v1"
 
@@ -88,15 +93,18 @@ def get_netease_multi(keyword, list_limit=30, platform="all"):
     time.sleep(0.5)
     # ===== 1️⃣ 搜索歌单 =====
     try:
-        r = requests.get(
-            f"{BASE}/music/search",
-            params={
-                "q": keyword,
-                "type": "playlist"
-            }
-        )
-
-        data = r.json().get("data",[])
+        data = KeySLCache.get(keyword)
+        if not data:
+            search_cnt += 1
+            r = requests.get(
+                f"{BASE}/music/search",
+                params={
+                    "q": keyword,
+                    "type": "playlist"
+                }
+            )
+            data = r.json().get("data",[])
+            KeySLCache.set(keyword, data)
         playlists = data.get("playlists", [])
 
     except Exception as e:
@@ -105,34 +113,45 @@ def get_netease_multi(keyword, list_limit=30, platform="all"):
 
     # ===== 2️⃣ 遍历歌单 =====
     list_count = 0
+    playlists = sorted(playlists, key=lambda x: x["play_count"], reverse=True)
     for p in playlists:
-
         pid = p["id"]
         pname = p["name"]
         source = p["source"]
         cover = p["cover"] 
+        play_cnt = p.get("play_count", 0)
 
         if source != platform and platform != "all":
             continue
 
-        list_count += 1
         if list_count == list_limit:
             break
 
-        logger.info(f"    {pname}")
+        if contain_all_dirtydata(pname, DIRTY_PLAYLIST_RULES) or len(pname) < 10:
+            logger.info(f"    脏数据，忽略歌单: {pname}")
+            continue
+        elif play_cnt < 10000 and play_cnt != 0:
+            logger.info(f"    播放较少（{play_cnt}），忽略歌单: {pname}")
+            continue
+        else:
+            list_count += 1
+            logger.info(f"    读取歌单: {pname}")
 
         try:
-            r2 = requests.get(
-                f"{BASE}/playlist/detail",
-                params={
-                    "id": pid,
-                    "source": source
-                }
-            )
+            songs_raw = SonglistCache.get(f"{pname}_{pid}")
+            if not songs_raw:
+                search_cnt += 1
+                r2 = requests.get(
+                    f"{BASE}/playlist/detail",
+                    params={
+                        "id": pid,
+                        "source": source
+                    }
+                )
 
-            detail = r2.json()
-
-            songs_raw = detail.get("data", [])
+                detail = r2.json()
+                songs_raw = detail.get("data", [])
+                SonglistCache.set(f"{pname}_{pid}", songs_raw)
 
             songs = [
                 {
@@ -155,6 +174,10 @@ def get_netease_multi(keyword, list_limit=30, platform="all"):
 
         except Exception as e:
             logger.exception(e)
+    
+    if search_cnt%100 == 0:
+        logger.info(f"    已网络处理 {search_cnt} 个网络请求，请等待10秒~\n")
+        time.sleep(10)
 
     return result
 
@@ -214,9 +237,16 @@ def generate_netease_multi(keyword, songs, limit, platform = "all", min_limit=2)
                 logger.warning(f"    只匹配到({len(matched)})首歌曲，跳过\n")
             continue
 
-        safe_name = pname.replace("/", "_")
+        # safe_name = pname.replace("/", "_")
 
-        save_playlist(f"PL_{source}_{safe_name}", matched, p["cover"])
+        from pypinyin import lazy_pinyin, Style
+        
+        first = lazy_pinyin(
+            pname[0],
+            style=Style.FIRST_LETTER
+        )[0]
+
+        save_playlist(f"{first.upper()}_{pname}_{source}", matched, p["cover"])
 
         logger.info(f"    匹配: {len(matched)} / {len(p['songs'])}\n")
 
@@ -484,9 +514,6 @@ def create_net_page(parent):
                         platform = platform
                     )
 
-                    if i%10 == 0:
-                        logger.info(f"    已网络处理 {i*10} 个歌单，请等待10秒~\n")
-                        time.sleep(10)
             # ================= 自定义关键词 =================
             else:
 
@@ -505,7 +532,9 @@ def create_net_page(parent):
                     min_limit = min_hj,
                     platform = platform,
                 )
-
+                
+            KeySLCache.save()
+            SonglistCache.save()
             logger.info("生成完成\n")
             btn.configure(state="enabled")
 

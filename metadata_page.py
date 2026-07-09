@@ -2,7 +2,6 @@ import time
 import threading
 import requests
 
-import musicbrainzngs
 import customtkinter as ctk
 
 from tkinter import filedialog
@@ -12,6 +11,7 @@ from script.load_music import *
 from script.music_tag import *
 from script.music_fetcher import MusicFetcher
 from script.logger import AppLogger
+from script.cache_manager import JsonCache
 
 from mutagen.easyid3 import EasyID3
 from mutagen.flac import FLAC, Picture
@@ -74,6 +74,8 @@ def get_year_from_netease(title, artist):
     return ''
 
 brainz = MusicFetcher(logger)
+BrainzSCache = JsonCache("cahce/song_cache_brainz.json", expire_days=365)
+NetSCache = JsonCache("cahce/song_cache_net.json", expire_days=365)
 
 def fetch_song_meta(title, artist="", plat="kugou", date_en = 1):
   
@@ -84,6 +86,7 @@ def fetch_song_meta(title, artist="", plat="kugou", date_en = 1):
     
     if plat == "brainz":
         s = brainz.build_song(title, artist)
+        BrainzSCache.set(f"{artist}-{title}", s)
         if not s:
             return None
         year = s.get("year")
@@ -136,7 +139,7 @@ def fetch_song_meta(title, artist="", plat="kugou", date_en = 1):
             if s == {}: 
                 return None
             
-            
+            NetSCache.set(f"{artist}-{title}", s)
             s["cover"] = s.get("cover").replace("240/","")
             
             song_id = s.get("id")
@@ -207,15 +210,15 @@ def make_flac_picture(img, max_size: int = 800) -> Picture:
  
     return pic
 
-def rewrite_songs(overwrite, path, meta, type, pixel=800):
+def rewrite_songs(overwrite, song, meta, type, pixel=800):
 
     if type == "flac":
-        audio = FLAC(path)
+        audio = FLAC(song["path"])
     elif type == "mp3":
-        audio = EasyID3(path)
+        audio = EasyID3(song["path"])
 
     # 基础数据
-    if overwrite or not audio.get("title"):
+    if overwrite or not song.get("title"):
         if meta["title"] != '':
             logger.info(f"    -> 重写 title: {meta["title"]}")
             audio["title"] = meta["title"]
@@ -223,21 +226,21 @@ def rewrite_songs(overwrite, path, meta, type, pixel=800):
             logger.info("    -> 没有获取到 title")
             
 
-    if overwrite or not audio.get("artist"):
+    if overwrite or not song.get("artist"):
         if meta["artist"] != '':
             logger.info(f"    -> 重写 artist: {meta["artist"]}")
             audio["artist"] = meta["artist"]
         else:
             logger.info("    -> 没有获取到 artist")
 
-    if overwrite or not audio.get("album"):
+    if overwrite or not song.get("album"):
         if meta["album"] != '':
             logger.info(f"    -> 重写 album: {meta["album"]}")
             audio["album"] = meta["album"]
         else:
             logger.info("    -> 没有获取到 album")
 
-    if overwrite or not audio.get("date"):
+    if overwrite or not song.get("date"):
         if meta["year"] != '':
             logger.info(f"    -> 重写 date: {meta["year"]}")
             audio["date"] = meta["year"]
@@ -246,18 +249,18 @@ def rewrite_songs(overwrite, path, meta, type, pixel=800):
     
     audio.save()
     if type == "mp3":
-        audio = MP3(path)
+        audio = MP3(song["path"])
 
     #歌词
     if type == "flac":
-        if overwrite or not audio.get("lyrics"):
+        if overwrite or not song.get("lyric"):
             if meta.get("lyric") != "":
                 logger.info(f"    -> 重写 lyric")
                 audio["lyrics"] = meta["lyric"]
             else:
                 logger.info("    -> 没有获取到 lyric")
     elif type == "mp3":
-        if overwrite or not audio.tags.getall("USLT"):
+        if overwrite or not song.get("lyric"):
             if meta.get("lyric") != "":
                 audio.tags.delall("USLT")
                 logger.info(f"    -> 重写 lyric")
@@ -302,9 +305,9 @@ def write_song_metadata(song, meta, pixel=800, overwrite=False):
     path = song["path"]
 
     if path.lower().endswith(".flac"):
-        audio = rewrite_songs(overwrite, path, meta, "flac", pixel)
+        audio = rewrite_songs(overwrite, song, meta, "flac", pixel)
     elif path.lower().endswith(".mp3"):
-        audio = rewrite_songs(overwrite, path, meta, "mp3", pixel)
+        audio = rewrite_songs(overwrite, song, meta, "mp3", pixel)
     else:
         return f"不支持的文件类型: {path}"
 
@@ -466,6 +469,8 @@ def create_metadata_page(parent):
                 logger.info(f"\n    已网络处理 {song_cnt} 首歌曲，请等待10秒~\n")
                 time.sleep(10)
 
+        BrainzSCache.save()
+        NetSCache.save()
         frame.after(
             0,
             lambda: status_label.configure(text="状态：完成 ✅")

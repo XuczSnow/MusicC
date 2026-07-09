@@ -17,9 +17,33 @@ songs = []
 global_path = ""
 logger = AppLogger()
 
+
+def resource_path(relative_path):
+    if hasattr(sys, '_MEIPASS'):
+        return os.path.join(sys._MEIPASS, relative_path)
+    return os.path.join(os.path.abspath("."), relative_path)
+
 def set_logger(func):
     global logger
     logger = func
+    
+# chinese_convert.py
+from hanziconv import HanziConv
+
+def to_simplified(text):
+
+    if not text:
+        return ""
+
+    return HanziConv.toSimplified(text)
+
+
+def to_traditional(text):
+
+    if not text:
+        return ""
+
+    return HanziConv.toTraditional(text)
 
 def split_artists(text):
 
@@ -152,7 +176,7 @@ def get_song_info(path:str, type:str):
         title = audio.get("title", [""])[0]
         artist = ""
         for ar in audio.get("artist", [""]):
-            artist += " ".join(split_artists(clean_text(ar))) + " "
+            artist += " ".join(split_artists(clean_text(ar, keep_numbers=True))) + " "
         artist = artist[:-1]
         # print(artist, audio.get("albumartist", [""]))
         album = audio.get("album", [""])[0]
@@ -161,8 +185,9 @@ def get_song_info(path:str, type:str):
         year = audio.get("date", [''])[0]
         
         #清除非法字符
-        title = sanitize_filename(title)
-        album = sanitize_filename(album)
+        artist = to_simplified(artist)
+        title = to_simplified(sanitize_filename(title))
+        album = to_simplified(sanitize_filename(album))
 
         if type == "flac":
             duration = int(audio.info.length)
@@ -179,13 +204,13 @@ def get_song_info(path:str, type:str):
             cover = True if audio.tags.getall("APIC") else False
             
         # 检查是否有脏数据
-        if contain_all_dirtydata(title):
+        if contain_all_dirtydata(title, DIRTY_METADATA_RULES) or len(title) > 50:
             logger.warning(f"title: {title} 为脏数据，忽略")
             title = ""
-        if contain_all_dirtydata(artist):
+        if contain_all_dirtydata(artist, DIRTY_METADATA_RULES) or len(artist) > 50:
             logger.warning(f"artist: {artist} 为脏数据，忽略")
             artist = ""
-        if contain_all_dirtydata(album):
+        if contain_all_dirtydata(album, DIRTY_METADATA_RULES) or len(album) > 50:
             logger.warning(f"album: {album} 为脏数据，忽略")
             album = ""
         if is_dirty_lyric(lyric):

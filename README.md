@@ -235,23 +235,29 @@ Music
 
 ### AI歌曲分类
 
-![](./asset/local.png)
+![](./assets/local.png)
 
 ### 网络歌单匹配
 
-![](./asset/net.png)
+![](./assets/net.png)
 
 ### 歌曲元数据增强
 
-![](./asset/meta.png)
+![](./assets/meta.png)
 
 ### 音乐文件整理
 
-![](./asset/class.png)
+![](./assets/class.png)
 
 ## License
 
-Apache License 2.0
+Copyright © 2026 Zong Xu
+
+Licensed under the Apache License, Version 2.0.
+
+You may obtain a copy of the License at:
+
+https://www.apache.org/licenses/LICENSE-2.0
 
 ## 现有问题记录
 

@@ -2,7 +2,7 @@ import subprocess
 import time
 import requests
 
-from script.music_tag import *
+from script.load_music import *
 
 api_process = None
 
@@ -23,7 +23,7 @@ def start_go_music_api(log = None, label = None):
         r = requests.get("http://localhost:8080/api/v1/system/cookies")
         print(r)
         if r.status_code == 200:
-            _logger("go-music-api 已经运行")
+            _logger("go-music-api 已经运行\n")
             label.configure(text="API运行中")
             return
     except:
@@ -47,7 +47,7 @@ def start_go_music_api(log = None, label = None):
             r = requests.get("http://localhost:8080/api/v1/system/cookies")
             print(r)
             if r.status_code == 200:
-                _logger("启动成功")
+                _logger("go-music-api 启动成功\n")
                 label.configure(text="API运行中")
                 return
         except:

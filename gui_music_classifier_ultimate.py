@@ -96,58 +96,52 @@ ctk.CTkCheckBox(frame_switch, text="歌手精选", variable=var_artist).pack(sid
 ctk.CTkCheckBox(frame_switch, text="年代", variable=var_era).pack(side="left", padx=10)
 
 # ✅ 第二行：阈值
-label_ai = ctk.CTkLabel(frame_control, text="AI阈值（匹配敏感度 0.2-0.8）: 0.4")
+frame_slider = ctk.CTkFrame(frame_control)
+frame_slider.pack(fill="x", padx=10, pady=10)
+
+label_ai = ctk.CTkLabel(frame_slider, text="AI阈值（匹配敏感度 0.2-0.8）: 0.4")
 label_ai.pack(anchor="w", padx=10)
 
 def ai_slider_changed(value):
     label_ai.configure(text="AI阈值（匹配敏感度 0.2-0.8）: "+format(value, '.2f'))
 
-slider_ai = ctk.CTkSlider(frame_control, from_=0.2, to=0.8)
+slider_ai = ctk.CTkSlider(frame_slider, from_=0.2, to=0.8)
 slider_ai.set(0.4)
 slider_ai.configure(command=ai_slider_changed)
 slider_ai.pack(fill="x", padx=10)
 
-# ✅ 第三行：权重
-label_weight_ai = ctk.CTkLabel(frame_control, text="AI权重（推荐影响 1-5）: 2")
-label_weight_ai.pack(anchor="w", padx=10)
+# # ✅ 第三行：权重
+# label_weight_ai = ctk.CTkLabel(frame_control, text="AI权重（推荐影响 1-5）: 2")
+# label_weight_ai.pack(anchor="w", padx=10)
 
-def ai_weight_slider_changed(value):
-    label_weight_ai.configure(text="AI权重（推荐影响 1-5）: "+str(int(value)))
+# def ai_weight_slider_changed(value):
+#     label_weight_ai.configure(text="AI权重（推荐影响 1-5）: "+str(int(value)))
 
-slider_weight_ai = ctk.CTkSlider(frame_control, from_=1, to=5)
-slider_weight_ai.set(2)
-slider_weight_ai.configure(command=ai_weight_slider_changed)
-slider_weight_ai.pack(fill="x", padx=10)
+# slider_weight_ai = ctk.CTkSlider(frame_control, from_=1, to=5)
+# slider_weight_ai.set(2)
+# slider_weight_ai.configure(command=ai_weight_slider_changed)
+# slider_weight_ai.pack(fill="x", padx=10)
 
-label_weight_net = ctk.CTkLabel(frame_control, text="网络权重（规则影响 0-5）: 1")
-label_weight_net.pack(anchor="w", padx=10)
+# label_weight_net = ctk.CTkLabel(frame_control, text="网络权重（规则影响 0-5）: 1")
+# label_weight_net.pack(anchor="w", padx=10)
 
-def net_weight_slider_changed(value):
-    label_weight_net.configure(text="网络权重（规则影响 0-5）: "+str(int(value)))
+# def net_weight_slider_changed(value):
+#     label_weight_net.configure(text="网络权重（规则影响 0-5）: "+str(int(value)))
 
-slider_weight_net = ctk.CTkSlider(frame_control, from_=0, to=5)
-slider_weight_net.set(1)
-slider_weight_net.configure(command=net_weight_slider_changed)
-slider_weight_net.pack(fill="x", padx=10)
+# slider_weight_net = ctk.CTkSlider(frame_control, from_=0, to=5)
+# slider_weight_net.set(1)
+# slider_weight_net.configure(command=net_weight_slider_changed)
+# slider_weight_net.pack(fill="x", padx=10)
 
-# ✅ 第四行：样本数
-frame_sample = ctk.CTkFrame(frame_control)
-frame_sample.pack(fill="x", padx=10, pady=10)
-
-ctk.CTkLabel(frame_sample, text="最大处理歌曲数").pack(side="left")
-
-entry_sample = ctk.CTkEntry(frame_sample, width=80)
-entry_sample.insert(0, "1000")
-entry_sample.pack(side="right")
 
 # ✅ 网络搜索数量
 frame_net = ctk.CTkFrame(frame_control)
 frame_net.pack(fill="x", padx=10, pady=5)
 
-ctk.CTkLabel(frame_net, text="网络搜索数量").pack(side="left")
+ctk.CTkLabel(frame_net, text="最大网络采样数量").pack(side="left")
 
 entry_net_limit = ctk.CTkEntry(frame_net, width=80)
-entry_net_limit.insert(0, "30")   # 默认5
+entry_net_limit.insert(0, "10")
 entry_net_limit.pack(side="right")
 
 # ================= 日志 =================
@@ -217,24 +211,10 @@ def initialize():
     ).start()
 
     # 延迟加载
-    app.after(
-        500,
-        load_net_page
-    )
-
-    app.after(
-        500,
-        load_mate_page
-    )
-
-    app.after(
-        500,
-        load_ori_page
-    )
-    app.after(
-        500,
-        load_aboout_page
-    )
+    app.after(100, load_net_page)
+    app.after(200, load_mate_page)
+    app.after(300, load_ori_page)
+    app.after(400, load_aboout_page)
 
 # ================= 运行 =================
 def run_task():
@@ -262,10 +242,9 @@ def run_task():
         use_era=var_era.get(),
 
         ai_threshold=slider_ai.get(),
-        weight_ai=int(slider_weight_ai.get()),
-        weight_net=int(slider_weight_net.get()),
-
-        max_sample=int(entry_sample.get()),
+        # weight_ai=int(slider_weight_ai.get()),
+        # weight_net=int(slider_weight_net.get()),
+        
         net_limit=int(entry_net_limit.get()),
 
         log=logger

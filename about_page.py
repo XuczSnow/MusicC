@@ -20,7 +20,6 @@ def open_url(url):
 
     try:
         ok = webbrowser.open(url)
-        print("打开链接")
 
     except Exception as e:
         print(e)
@@ -132,17 +131,11 @@ def create_about_page(parent):
 
     license_text = """📜 开源协议
 本项目采用 Apache License 2.0 开源协议:
-https://www.apache.org/licenses/LICENSE-2.0
-"""
-
-    ctk.CTkTextbox(
-        frame,
-        height=120
-    )
+https://www.apache.org/licenses/LICENSE-2.0"""
 
     license_box = ctk.CTkTextbox(
         frame,
-        height=60
+        height=70
     )
 
     license_box.pack(
@@ -178,7 +171,7 @@ https://www.apache.org/licenses/LICENSE-2.0
 
     wechat_img = ctk.CTkImage(
         Image.open(
-            resource_path("assets/wechat_pay.jpg")
+            resource_path("assets/wechat_pay.png")
         ),
         size=(180,180)
     )

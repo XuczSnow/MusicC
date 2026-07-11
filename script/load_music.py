@@ -45,42 +45,58 @@ def to_traditional(text):
 
     return HanziConv.toTraditional(text)
 
-def split_artists(text):
+import re
 
+def is_chinese_text(text: str) -> bool:
+    if not text:
+        return False
+
+    return all(
+        ('\u4e00' <= ch <= '\u9fff') or ch.isspace()
+        for ch in text
+    )
+
+
+def split_artists(text: str) -> list:
     if not text:
         return []
 
-    text = text.strip()
+    text = str(text).strip()
 
-    artists = re.split(
-        r'\s*(?:;|,|/|&|feat\.?|ft\.?| x )\s*',
-        text,
-        flags=re.IGNORECASE
+    text = re.sub(
+        r'(?i)\s*(?:feat\.?|ft\.?|with)\s*',
+        ';',
+        text
     )
 
+    text = re.sub(
+        r'\s*(?:&|/|、|\||;|,|，|；)\s*',
+        ';',
+        text
+    )
     artists = [
-        a.strip()
-        for a in artists
-        if a.strip()
+        artist.strip()
+        for artist in text.split(';')
+        if artist.strip()
     ]
 
-    # 如果没有分隔符
-    # 且全是中文
-    # 连续两个以上空格视为分隔
+    english_temp = ''
     if len(artists) == 1:
+        value = artists[0]
+        parts = value.split()
+        artists = []
+        for p in parts:
+            if is_chinese_text(p):
+                artists.append(p)
+                if english_temp != '':
+                    artists.append(english_temp.strip())
+                english_temp = ''
+            else:
+                english_temp += p + ' '
+        if english_temp != '':
+            artists.append(english_temp.strip())
 
-        artists = re.split(
-            r'\s{2,}',
-            artists[0]
-        )
-
-        artists = [
-            a.strip()
-            for a in artists
-            if a.strip()
-        ]
-
-    return artists
+    return list(dict.fromkeys(artists))
 
 def keep_newest(path_a, payh_b):
 
@@ -168,6 +184,7 @@ def extract_song_artist(filepath):
 
 def get_song_info(path:str, type:str):
     lyric = ''
+    overwrite = False
     try:
         if type == "flac":
             audio = FLAC(path)
@@ -206,22 +223,28 @@ def get_song_info(path:str, type:str):
         # 检查是否有脏数据
         if contain_all_dirtydata(title, DIRTY_METADATA_RULES) or len(title) > 50:
             logger.warning(f"title: {title} 为脏数据，忽略")
+            overwrite = True
             title = ""
-        if contain_all_dirtydata(artist, DIRTY_METADATA_RULES) or len(artist) > 50:
+        if contain_all_dirtydata(artist, DIRTY_METADATA_RULES):
             logger.warning(f"artist: {artist} 为脏数据，忽略")
+            overwrite = True
             artist = ""
         if contain_all_dirtydata(album, DIRTY_METADATA_RULES) or len(album) > 50:
             logger.warning(f"album: {album} 为脏数据，忽略")
+            overwrite = True
             album = ""
         if is_dirty_lyric(lyric):
             logger.warning(f"lyric: {lyric} 为脏数据，忽略")
+            overwrite = True
             lyric = ""
         
         # 如果获取不到，从文件名获取
         res = extract_song_artist(path)
         if title.strip() == "":
+            overwrite = True
             title = res["song"]
         if artist.strip() == "":
+            overwrite = True
             artist = res["artist"]
         
         #如果没有获取到title，返回失败   
@@ -233,6 +256,8 @@ def get_song_info(path:str, type:str):
         logger.exception(e)
         logger.error(f"读取 {path} 失败，出现未知错误，请检查log")
         return None
+    
+    tags = []
         
     return {
         "title": title,
@@ -243,8 +268,10 @@ def get_song_info(path:str, type:str):
         "duration": duration,
         "album": album,
         "cover": cover,
-        "tags": [],
-        "score": 0
+        "net_tags": { f"NET_{tag}": {"tag": f"NET_{tag}", "score": 0} for value in TAG_DEFINITIONS.values() for tag in value.keys()},
+        "ai_tags": { f"AI_{tag}": {"tag": f"AI_{tag}", "score": 0} for tag in AI_LYRICS_DEFINITIONS.keys()},
+        "rank": 0,
+        "overwrite": overwrite
     }
 
 def load_music(folder, log = None, reload = False):
@@ -286,8 +313,12 @@ def load_music(folder, log = None, reload = False):
                 if key in unique:
                     logger.warning(f"歌曲重复：{song['artist']} - {song['title']}")
                     print(f"已存在：{songs[unique[key]]}")
+                    print(f"新歌曲：{song}")
                     if path.lower().endswith(".flac") and songs[unique[key]]['path'].lower().endswith(".mp3"):
                         logger.info("优先选取flac文件")
+                        songs[unique[key]] = song
+                    elif os.path.getsize(path) > os.path.getsize(songs[unique[key]]['path']):
+                        logger.info("优先选取文件较大的歌曲")
                         songs[unique[key]] = song
                     continue
                 

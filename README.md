@@ -259,7 +259,3 @@ You may obtain a copy of the License at:
 
 https://www.apache.org/licenses/LICENSE-2.0
 
-## 现有问题记录
-
-1. 音乐年份获取统一使用netease源
-2. 部分歌曲歌词不好获取

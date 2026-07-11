@@ -1,3 +1,7 @@
+from script.logger import AppLogger
+
+logger = AppLogger()
+
 DIRTY_PLAYLIST_RULES = {
 
     # ==========================
@@ -5,28 +9,17 @@ DIRTY_PLAYLIST_RULES = {
     # ==========================
 
     "bad_playlist_names": {
-
         "未命名",
         "默认歌单",
         "新建歌单",
         "我的歌单",
-
-        "playlist",
         "my playlist",
-
         "test",
         "demo",
-
-        "歌单",
-        "音乐",
-
-        "喜欢的音乐",
         "我喜欢的音乐",
-
         "抖音",
-        "DJ",
+        "dj",
         "收藏夹",
-
         "未知歌单"
     },
 
@@ -35,37 +28,25 @@ DIRTY_PLAYLIST_RULES = {
     # ==========================
 
     "marketing_keywords": {
-
         "免费",
         "vip",
         "会员",
-
         "下载",
         "免费下载",
         "高速下载",
-
         "资源包",
         "资源群",
-
         "加微信",
         "微信",
-
         "加qq",
         "qq群",
-
         "联系客服",
-
         "福利",
-
         "推广",
         "广告",
-
         "私信",
-
         "引流",
-
         "扫码",
-
         "领取"
     },
 
@@ -74,30 +55,17 @@ DIRTY_PLAYLIST_RULES = {
     # ==========================
 
     "crawler_keywords": {
-
         "合集",
         "大全",
-
         "打包",
-
         "资源库",
-
         "全收录",
-
         "最全",
-
         "全网最全",
-
         "全平台",
-
-        "精选",
-
         "搜集整理",
-
         "持续更新",
-
         "搬运",
-
         "转载",
         "全集"
     },
@@ -107,22 +75,15 @@ DIRTY_PLAYLIST_RULES = {
     # ==========================
 
     "test_keywords": {
-
         "test",
-
         "demo",
-
         "测试",
-
         "试试",
-
         "aaa",
         "bbb",
         "ccc",
-
         "123",
         "1234",
-
         "111",
         "222",
         "333"
@@ -133,17 +94,11 @@ DIRTY_PLAYLIST_RULES = {
     # ==========================
 
     "garbled_keywords": {
-
         "�",
-
         "□",
-
         "????",
-
         "?????",
-
         "����",
-
         "乱码"
     },
 
@@ -152,25 +107,15 @@ DIRTY_PLAYLIST_RULES = {
     # ==========================
 
     "low_quality_keywords": {
-
         "随便听听",
-
         "乱七八糟",
-
         "不知道叫什么",
-
         "自己听",
-
         "哈哈",
-
         "嘻嘻",
-
         "嘿嘿",
-
         "收藏一下",
-
         "备用",
-
         "留着"
     },
 
@@ -179,25 +124,15 @@ DIRTY_PLAYLIST_RULES = {
     # ==========================
 
     "spam_keywords": {
-
         "兼职",
-
         "赚钱",
-
         "网赚",
-
         "投资",
-
         "股票",
-
         "理财",
-
         "福彩",
-
         "彩票",
-
         "赌博",
-
         "博彩"
     },
 
@@ -206,13 +141,9 @@ DIRTY_PLAYLIST_RULES = {
     # ==========================
 
     "default_cover_keywords": {
-
         "default",
-
         "unknown",
-
         "placeholder",
-
         "nocover"
     },
 }
@@ -449,6 +380,19 @@ def is_dirty_artist(artist):
 def is_dirty_lyric(lyric):
     if len(lyric) < 100:
         return True
+    
+def is_dirty_playlist(pname, play_cnt, track_cnt):
+    if contain_all_dirtydata(pname, DIRTY_PLAYLIST_RULES) or len(pname) < 7:
+        logger.info(f"    脏数据，忽略歌单: {pname}")
+        return True
+    elif play_cnt < 10000 and play_cnt != 0:
+        logger.info(f"    播放较少（{play_cnt}），忽略歌单: {pname}")
+        return True
+    elif track_cnt > 200:
+        logger.info(f"    歌单杂乱（{track_cnt}），忽略歌单: {pname}")
+        return True
+    else:
+        return False
 
 def contains_ad_words(text):
 

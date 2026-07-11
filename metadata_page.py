@@ -74,8 +74,8 @@ def get_year_from_netease(title, artist):
     return ''
 
 brainz = MusicFetcher(logger)
-BrainzSCache = JsonCache("cahce/song_cache_brainz.json", expire_days=365)
-NetSCache = JsonCache("cahce/song_cache_net.json", expire_days=365)
+BrainzSCache = JsonCache("cahce/song_cache_brainz.json")
+NetSCache = JsonCache("cahce/song_cache_net.json")
 
 def fetch_song_meta(title, artist="", plat="kugou", date_en = 1):
   
@@ -178,7 +178,6 @@ def fetch_song_meta(title, artist="", plat="kugou", date_en = 1):
     }
 
 
-
 def download_cover(url):
     if not url:
         return None
@@ -240,10 +239,11 @@ def rewrite_songs(overwrite, song, meta, type, pixel=800):
         else:
             logger.info("    -> 没有获取到 album")
 
-    if overwrite or not song.get("date"):
+    if overwrite:
         if meta["year"] != '':
-            logger.info(f"    -> 重写 date: {meta["year"]}")
-            audio["date"] = meta["year"]
+            if meta["year"] < song.get("year", "9999"):
+                logger.info(f"    -> 重写 date: {meta["year"]}")
+                audio["date"] = meta["year"]
         else:
             logger.info("    -> 没有获取到 date")        
     
@@ -301,6 +301,22 @@ def rewrite_songs(overwrite, song, meta, type, pixel=800):
     audio.save()
     return audio
 
+def rewrite_date(song, meta, type):
+    if type == "flac":
+        audio = FLAC(song["path"])
+    elif type == "mp3":
+        audio = EasyID3(song["path"])
+    year = get_year_from_netease(song["title"], song["artist"])
+    if year != '':
+        if year < song.get("year", "9999"):
+            logger.info(f"    -> 重写 date: {year}")
+            audio["date"] = year
+            audio.save()
+        else:
+            logger.info("    -> 无需重写 date")
+    else:
+        logger.info("    -> 没有获取到 date")        
+
 def write_song_metadata(song, meta, pixel=800, overwrite=False):
     path = song["path"]
 
@@ -350,35 +366,52 @@ def create_metadata_page(parent):
         option_frame,
         text="覆盖原始元数据",
         variable=overwrite_var
-    ).pack(side="left", padx=3, pady=5)
+    ).pack(side="left", padx=10, pady=5)
+
+    overwrite_dirty_var = ctk.BooleanVar(value=False)
+
+    ctk.CTkCheckBox(
+        option_frame,
+        text="强制覆盖脏数据",
+        variable=overwrite_dirty_var
+    ).pack(side="left", padx=10, pady=5)
+
+    overwrite_date_var = ctk.BooleanVar(value=False)
+
+    ctk.CTkCheckBox(
+        option_frame,
+        text="强制更新年份",
+        variable=overwrite_date_var
+    ).pack(side="left", padx=10, pady=5)
+
 
     # 平台选择
-    # platform_frame = ctk.CTkFrame(option_frame)
-    # platform_frame.pack(fill="x", padx=10, pady=5)
+    platform_frame = ctk.CTkFrame(frame)
+    platform_frame.pack(fill="x", padx=20, pady=10)
 
     ctk.CTkLabel(
-        option_frame,
-        text="| 元数据来源平台"
-    ).pack(side="left", padx=3)
+        platform_frame,
+        text="元数据来源平台"
+    ).pack(side="left", padx=5)
 
     platform_var = ctk.StringVar(value="brainz")
 
     platform_menu = ctk.CTkOptionMenu(
-        option_frame,
+        platform_frame,
         values=["brainz"] + MUSIC_PLATFARM[1:],
         variable=platform_var
     )
 
-    platform_menu.pack(side="left", padx=3)
+    platform_menu.pack(side="left", padx=5)
 
-    ctk.CTkLabel(
-        option_frame,
-        text="| 图像最大分辨率: "
-    ).pack(side="left", padx=3)
-
-    pixel_limit = ctk.CTkEntry(option_frame)
+    pixel_limit = ctk.CTkEntry(platform_frame)
     pixel_limit.insert(0, "800")
     pixel_limit.pack(side="right")
+
+    ctk.CTkLabel(
+        platform_frame,
+        text="图像最大分辨率: "
+    ).pack(side="right", padx=5)
 
     status_label = ctk.CTkLabel(frame, text="状态：等待开始")
     status_label.pack(pady=5)
@@ -407,6 +440,8 @@ def create_metadata_page(parent):
         btn.configure(state="disabled")
 
         overwrite = overwrite_var.get()
+        overwrite_dirty = overwrite_dirty_var.get()
+        overwrite_date = overwrite_date_var.get()
         plat = platform_var.get()
         pixel = int(pixel_limit.get())
 
@@ -437,15 +472,22 @@ def create_metadata_page(parent):
                         "album",
                         "cover"]
             all_info = True
-
+            
             for info in info_list:
                 if song[info] in [False, '', [], {}, -1]:
                     all_info = False
                     break
 
             if all_info and not overwrite:
-                logger.info("    跳过-歌曲信息完整\n")
-                continue
+                if overwrite_dirty and song["overwrite"]:
+                    logger.info("    有脏数据，尝试 Overwrite")
+                elif overwrite_date:
+                    logger.info("    其他信息完整，强制更新年份，尝试 Overwrite")
+                    rewrite_date(song, {}, song["path"].split(".")[-1])
+                    continue
+                else:
+                    logger.info("    跳过-歌曲信息完整\n")
+                    continue
 
             meta = fetch_song_meta(song['title'], song['artist'], plat, date_en = 0 if song["year"] else 1)
 
@@ -457,7 +499,7 @@ def create_metadata_page(parent):
                 song,
                 meta,
                 pixel,
-                overwrite=overwrite
+                overwrite=overwrite|song["overwrite"] if overwrite_dirty else overwrite
             )
 
             if result is True:

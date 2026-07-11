@@ -329,7 +329,7 @@ def create_organize_page(parent):
 
                     dst_dir = os.path.join(
                         out_dir,
-                        artist.split(" ")[0],
+                        split_artists(artist)[0],
                         album
                     )
 
@@ -337,7 +337,7 @@ def create_organize_page(parent):
 
                     dst_dir = os.path.join(
                         out_dir,
-                        artist.split(" ")[0]
+                        split_artists(artist)[0]
                     )
 
                 else:

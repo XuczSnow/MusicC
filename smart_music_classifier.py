@@ -21,10 +21,10 @@ USE_ARTIST = True
 USE_ERA = True
 
 AI_THRESHOLD = 0.4
-WEIGHT_AI = 2
+WEIGHT_AI = 0
 WEIGHT_NET = 1
-MAX_SAMPLE = 1000
-NET_LIMIT = 30
+# MAX_SAMPLE = 1000
+NET_LIMIT = 10
 
 if len(sys.argv) > 1:
     MUSIC_DIR = sys.argv[1]
@@ -36,9 +36,8 @@ if len(sys.argv) > 1:
     AI_THRESHOLD = float(sys.argv[6])
     WEIGHT_AI = int(sys.argv[7])
     WEIGHT_NET = int(sys.argv[8])
-    MAX_SAMPLE = int(sys.argv[9])
-# MUSIC_DIR = r"."
-# MAX_SAMPLE = 50
+    NET_LIMIT = float(sys.argv[9])
+    # MAX_SAMPLE = int(sys.argv[9])
 
 # ===== 全局日志函数 =====
 logger = AppLogger()
@@ -85,34 +84,22 @@ def get_model():
 
 # ---------------- 年代 ----------------
 
-def year_tag(song):
+# def year_tag(song):
 
-    try:
-        y = int(song["year"][:4])
-    except Exception as e:
-        logger.exception(e)
-        return ""
+#     try:
+#         y = int(song["year"][:4])
+#     except Exception as e:
+#         logger.exception(e)
+#         return ""
 
-    if y == 0:
-        return ""
-    else:
-        return ["ERA", "📅_" + str(y)[0:3] + "0s"]
-    # elif y < 1990:
-    #     return "📅_1980s"
-    # elif y < 1990:
-    #     return "📅_1980s"
-    # elif y < 2000:
-    #     return "📅_1990s"
-    # elif y < 2010:
-    #     return "📅_2000s"
-    # elif y < 2020:
-    #     return "📅_2010s"
-    # else:
-    #     return "📅_2020s"
+#     if y == 0:
+#         return ""
+#     else:
+#         return {"tag": f"ERA_📅_{str(y)[0:3]}0s", "score": 0}
 
 # ---------------- 在线云搜索 ----------------
 TitleSLCache = JsonCache("cahce/songlist_cache_title.json")
-SonglistCache = JsonCache("cahce/songlist_cache.json",expire_days=100)
+SonglistCache = JsonCache("cahce/songlist_cache.json")
 search_cnt = 0
 
 def wy_search(title, artist, album):
@@ -121,7 +108,6 @@ def wy_search(title, artist, album):
     BASE = "http://localhost:8080/api/v1"
     url = f"{BASE}/music/search"
     pnames = []
-    score = 0
 
     if search_cnt%100 == 0 and search_cnt != 0:
         logger.info(f"    已网络处理 {search_cnt} 首歌曲，请等待10秒~\n")
@@ -145,20 +131,19 @@ def wy_search(title, artist, album):
         
     except Exception as e:
         logger.exception(e)
-        
-    for p in plylist[:NET_LIMIT]:
+
+    pl_cnt = 0 
+    for p in plylist:
         pid = p["id"]
         pname = p["name"]
         source = p["source"]
         play_cnt = p.get("play_count", 0)
-        
-        if contain_all_dirtydata(pname, DIRTY_PLAYLIST_RULES) or len(pname) < 10:
-            logger.info(f"    脏数据，忽略歌单: {pname}")
-            continue
-        elif play_cnt < 10000 and play_cnt != 0:
-            logger.info(f"    播放较少（{play_cnt}），忽略歌单: {pname}")
+        track_cnt = p.get("track_count", 0)
+            
+        if is_dirty_playlist(pname, play_cnt, track_cnt):
             continue
         else:
+            pl_cnt += 1
             logger.info(f"    读取歌单: {pname}")
             
         try:
@@ -178,45 +163,36 @@ def wy_search(title, artist, album):
                     SonglistCache.set(f"{pname}_{pid}", songs_raw)
         except Exception as e:
             logger.exception(e)
+            
+        def is_similar(s1, s2):
+            return (s1 in s2) or (s2 in s1)
         
         if songs_raw != [] and songs_raw != None:
             for s in songs_raw:
-                if title == s.get("name") and artist == s.get("artist"):
-                    pnames.append(pname)
-                    score += play_cnt/10000
+                if is_similar(title, s.get("name")) and is_similar(artist, s.get("artist")):
+                    if play_cnt == 0:
+                        pscore = 1
+                    else:
+                        pscore = play_cnt/100/track_cnt
+                    pnames.append({"pname":pname, "pscore":pscore})
                     continue
+                
+        if pl_cnt > NET_LIMIT:
+            break
 
-        # params = {
-        #     "q": album,
-        #     "type": "playlist"}
-        # data = AlbumSLCache.get(album)
-        # if not data:
-        #     search_cnt +=1
-        #     r = requests.get(url, params=params)
-        #     data = r.json().get("data",[])
-        #     AlbumSLCache.set(album, data)
-        # plylist = data.get("playlists",[])
-        # if plylist:
-        #     plylist = sorted(plylist, key=lambda x: x["play_count"], reverse=True)
-        #     for p in plylist[:NET_LIMIT]:
-        #         if p.get("play_count", 0) > 10000:
-        #             results.append(p["name"])
-        #         else:
-        #             break
-
-    return [list(set(pnames)), score]
+    return pnames
 
 # ---------------- 简单标签规则 ----------------
 def extract_tags(name):
 
-    name_lower = name.lower()
+    name_lower = name["pname"].lower()
     result = []
 
     for ilist in TAG_DEFINITIONS.values():
         for tag, keywords in ilist.items():
             for k in keywords:
                 if k.lower() in name_lower:
-                    result.append(["NET", tag])
+                    result += [{"tag": f"NET_{tag}", "score": name["pscore"]}]
                     break
 
     return result
@@ -261,149 +237,101 @@ def ai_tags_from_lyric(lyric):
 
 # ---------------- 分类 ----------------
 def classify(songs):
-
     logger.info("歌曲分类中...")
-    artist_best = defaultdict(list)
-    for s in songs[:MAX_SAMPLE]:
+    total = len(songs)
+    song_cnt = 0
+    
+    for s in songs:
+        song_cnt += 1
         keyword = f"{s['title']} {s['artist']}"
-        logger.info("  分析:"+keyword)
+        logger.info(f"  状态：处理中 {song_cnt}/{total}--->分析:"+keyword)
 
         if USE_NET:
+            net_tags = []
             logger.info("    在线分类中...")
-            [names, score] = wy_search(s['title'], s['artist'], s['album'])
-                        
-            if USE_ARTIST:
-                at = s['artist'].split(" ")[0]
-                artist_best[at].append({"song":s, "score":score})
-
+            names = wy_search(s['title'], s['artist'], s['album'])
+            
+            tags = []
             # ✅ 歌单标签
-            for n in names[:5]:
-                tags = extract_tags(n)
-                s["tags"] += tags
-                s["score"] += WEIGHT_NET
-
-                # if USE_ARTIST:
-                #     for t in tags:
-                #         # 🎤 歌手精选
-                #         if "精选" in t[1] and s["artist"] and s["artist"] in n:
-                #             tag_name = f"🎤_{s['artist']}_精选"
-                #             if not tag_name in str(s["tags"]):
-                #                 s["tags"].append(["ARTIST", tag_name])
-                #             s["score"] += WEIGHT_NET + 1
-                #         else:
-                #             if not t[1] in str(s["tags"]):
-                #                 s["tags"].append(t)
-                #             s["score"] += WEIGHT_NET
+            for n in names:
+                tags += extract_tags(n)
+            
+            for tag in tags:
+                if tag == []:
+                    continue
+                s["net_tags"][tag["tag"]]["score"] += tag["score"]
         
         if USE_AI:
             # ✅ AI标签
             # ai = ai_tags(s["title"], s["artist"])
-            logger.info("    AI分类中...")
+            logger.info("    AI分类中...\n")
             lyric = s["lyric"]
             ai = ai_tags_from_lyric(lyric)
 
-            for source, tag, score in ai:
-                s["tags"].append([source, tag])
-                s["score"] += score * WEIGHT_AI
+            for source, tag, ai_score in ai:
+                s["ai_tags"][f"AI_{tag}"]["score"] += ai_score
 
-        if USE_ERA:
-            # ✅ 年代
-            logger.info("    年代分类中...\n")
-            y = year_tag(s)
-            if y:
-                s["tags"].append(y)
+        # if USE_ERA:
+        #     # ✅ 年代
+        #     logger.info("    年代分类中...\n")
+        #     y = year_tag(s)
+        #     if y:
+        #         s["tags"][y]["score"] += 1
                 
         # # ✅ 限制标签数量
         # s["tags"] = list(set(s["tags"]))[:5]
     logger.info("歌曲分析完成\n")
-    return [songs, artist_best]
+    return songs
 
 # ---------------- 输出 ----------------
-def save(songs):
-    logger.info("生成歌单中...")
-    grouped = defaultdict(list)
-
-    # 存储缓存
-    TitleSLCache.save()
-
+def save_era(songs, path):
+    era_best = defaultdict(list)
+    
     for s in songs:
-        for src, tag in s["tags"]:
-            name = f"{src}_{tag}"
-            grouped[name].append(s)
-
-    path = f"{MUSIC_DIR}/AI分类歌单"
-
-    os.makedirs(path, exist_ok=True)
-
-    for tag_name, song_objs in grouped.items():
-
-        # ✅ 排序（所有歌单保持一致）
-        song_objs = sorted(song_objs, key=lambda x: x["score"], reverse=True)
-
-        tag_name = sanitize_filename(tag_name)
-        file_dir = f"{path}/0_{tag_name}"
-        os.makedirs(file_dir, exist_ok=True)
-        file_path = f"{file_dir}/0_{tag_name}.m3u"
-        pic_name = tag_name.split('_')
-        pic_patch = resource_path(f"assets/{pic_name[1]} {pic_name[2]}.png")
+        y = s['year'][:3]
+        if y == "0" or y == "":
+            continue
+        era_best[y].append(s)
         
-        if os.path.exists(pic_patch):
-            shutil.copy(pic_patch, file_dir + "/cover.png")
-        else:
-            shutil.copy(resource_path("assets/cover.jpeg"), file_dir)
+    for y, y_songs in era_best.items():
+       
+        ranked = sorted(y_songs, key=lambda x: x["rank"], reverse=True)
+        
+        file_dir = f"{path}/0_ERA_📅_{y}0s"
+        os.makedirs(file_dir, exist_ok=True)
+        file_path = f"{file_dir}/0_ERA_📅_{y}0s.m3u"
+        shutil.copy(resource_path("assets/cover.jpeg"), file_dir)
+        logger.info("  ->生成:"+file_path)
 
         with open(file_path, "w", encoding="utf-8") as f:
-
             f.write("#EXTM3U\n")
-            f.write(f"#PLAYLIST:{tag_name}\n")
+            f.write(f"#PLAYLIST:0_ERA_📅_{y}0s\n")
 
-            for s in song_objs[:50]:
-
+            for s in ranked[:50]:
                 title = s.get("title", "未知")
                 artist = s.get("artist", "未知")
                 album = s.get("album", "未知专辑")
-
-                # ✅ 如果没有duration，先写 -1 或固定值
                 duration = s.get("duration", -1)
 
                 f.write(f"#EXTALB:{album}\n")
                 f.write(f"#EXTART:{artist}\n")
                 f.write(f"#EXTINF:{duration},{artist} - {title}\n")
                 f.write(s["path"] + "\n")
-
-        logger.info("  ->生成:"+file_path)
-
-    # ✅ DailyMix
-    ranked = sorted(songs, key=lambda x: x["score"], reverse=True)
-
-    file_dir = f"{path}/DailyMix"
-    os.makedirs(file_dir, exist_ok=True)
-    file_path = f"{file_dir}/DailyMix.m3u"
-    shutil.copy(resource_path("assets/cover.jpeg"), file_dir)
-
-    with open(file_path, "w", encoding="utf-8") as f:
-        f.write("#EXTM3U\n")
-        f.write("#PLAYLIST:DailyMix\n")
-
-        for s in ranked[:50]:
-            title = s.get("title", "未知")
-            artist = s.get("artist", "未知")
-            album = s.get("album", "未知专辑")
-            duration = s.get("duration", -1)
-
-            f.write(f"#EXTALB:{album}\n")
-            f.write(f"#EXTART:{artist}\n")
-            f.write(f"#EXTINF:{duration},{artist} - {title}\n")
-            f.write(s["path"] + "\n")
             
-def save_artist(artist_best):
-    for at, songs in artist_best.items():
-        if len(songs) < 30:
+def save_artist(songs, path):
+
+    artist_best = defaultdict(list)
+
+    for s in songs:
+        at = s['artist'].split(" ")[0].lower()
+        artist_best[at].append(s)
+        
+    for at, at_songs in artist_best.items():
+        if len(at_songs) < 20:
             continue
         
-        ranked = sorted(songs, key=lambda x: x["score"], reverse=True)
+        ranked = sorted(at_songs, key=lambda x: x["rank"], reverse=True)
         
-        path = f"{MUSIC_DIR}/AI分类歌单"
         file_dir = f"{path}/0_{at}_🎤_精选"
         os.makedirs(file_dir, exist_ok=True)
         file_path = f"{file_dir}/0_{at}_🎤_精选.m3u"
@@ -412,10 +340,9 @@ def save_artist(artist_best):
 
         with open(file_path, "w", encoding="utf-8") as f:
             f.write("#EXTM3U\n")
-            f.write(f"#PLAYLIST:0_{at}_🎤_精选n")
+            f.write(f"#PLAYLIST:0_{at}_🎤_精选\n")
 
-            for song in ranked[:50]:
-                s = song["song"]
+            for s in ranked[:50]:
                 title = s.get("title", "未知")
                 artist = s.get("artist", "未知")
                 album = s.get("album", "未知专辑")
@@ -425,7 +352,102 @@ def save_artist(artist_best):
                 f.write(f"#EXTART:{artist}\n")
                 f.write(f"#EXTINF:{duration},{artist} - {title}\n")
                 f.write(s["path"] + "\n")
-            
+
+def save_plylist(songs, tag_name, path, type):
+    song_objs = sorted(songs, key=lambda x: x[type][tag_name]["score"], reverse=True)
+
+    file_dir = f"{path}/0_{tag_name}"
+    os.makedirs(file_dir, exist_ok=True)
+    
+    file_path = f"{file_dir}/0_{tag_name}.m3u"
+    pic_name = tag_name.split('_')
+    pic_patch = resource_path(f"assets/{pic_name[1]} {pic_name[2]}.png")
+    
+    if os.path.exists(pic_patch):
+        shutil.copy(pic_patch, file_dir + "/cover.png")
+    else:
+        shutil.copy(resource_path("assets/cover.jpeg"), file_dir)
+
+    with open(file_path, "w", encoding="utf-8") as f:
+
+        f.write("#EXTM3U\n")
+        f.write(f"#PLAYLIST:0_{tag_name}\n")
+
+        for s in song_objs[:50]:
+
+            if s[type][tag_name]["score"] <= 0:
+                break
+
+            title = s.get("title", "未知")
+            artist = s.get("artist", "未知")
+            album = s.get("album", "未知专辑")
+
+            # ✅ 如果没有duration，先写 -1 或固定值
+            duration = s.get("duration", -1)
+
+            f.write(f"#EXTALB:{album}\n")
+            f.write(f"#EXTART:{artist}\n")
+            f.write(f"#EXTINF:{duration},{artist} - {title}\n")
+            f.write(s["path"] + "\n")
+
+    logger.info("  ->生成:"+file_path)
+
+def save(songs):
+    logger.info("生成歌单中...")
+
+    # 存储缓存
+    TitleSLCache.save()
+
+    path = f"{MUSIC_DIR}/AI分类歌单"
+    # 保存 NET 标签歌单
+    if USE_NET:
+        logger.info("  生成 NET 标签歌单中...")
+        for value in TAG_DEFINITIONS.values():
+            for tag in value.keys():
+                tag_name = f"NET_{tag}"
+                for song in songs:
+                    song["rank"] += song["net_tags"][tag_name]["score"] * WEIGHT_NET
+                save_plylist(songs, tag_name, path, "net_tags")
+
+    # 保存 AI 标签歌单
+    if USE_AI:
+        logger.info("  生成 AI 标签歌单中...")
+        for tag in AI_LYRICS_DEFINITIONS.keys():
+            tag_name = f"AI_{tag}"
+            for song in songs:
+                song["rank"] += song["ai_tags"][tag_name]["score"] * WEIGHT_AI
+            save_plylist(songs, tag_name, path, "ai_tags")
+    
+    if USE_ERA:
+        logger.info("  生成 年代精选歌单中...")
+        save_era(songs, path)
+    
+    if USE_ARTIST:
+        logger.info("  生成 歌手精选歌单中...")
+        save_artist(songs, path)
+
+    # # ✅ DailyMix
+    # ranked = sorted(songs, key=lambda x: x["score"], reverse=True)
+
+    # file_dir = f"{path}/DailyMix"
+    # os.makedirs(file_dir, exist_ok=True)
+    # file_path = f"{file_dir}/DailyMix.m3u"
+    # shutil.copy(resource_path("assets/cover.jpeg"), file_dir)
+
+    # with open(file_path, "w", encoding="utf-8") as f:
+    #     f.write("#EXTM3U\n")
+    #     f.write("#PLAYLIST:DailyMix\n")
+
+    #     for s in ranked[:50]:
+    #         title = s.get("title", "未知")
+    #         artist = s.get("artist", "未知")
+    #         album = s.get("album", "未知专辑")
+    #         duration = s.get("duration", -1)
+
+    #         f.write(f"#EXTALB:{album}\n")
+    #         f.write(f"#EXTART:{artist}\n")
+    #         f.write(f"#EXTINF:{duration},{artist} - {title}\n")
+    #         f.write(s["path"] + "\n")
 
 # ---------------- MAIN ----------------
 def run_classifier(
@@ -435,10 +457,9 @@ def run_classifier(
     use_artist=True,
     use_era=True,
     ai_threshold=0.4,
-    weight_ai=2,
+    weight_ai=0,
     weight_net=1,
-    max_sample=1000,
-    net_limit=30,
+    net_limit=10,
     log=None   # ✅ 接收GUI日志函数
 ):
     global MUSIC_DIR
@@ -449,7 +470,6 @@ def run_classifier(
     global AI_THRESHOLD
     global WEIGHT_AI
     global WEIGHT_NET
-    global MAX_SAMPLE
     global NET_LIMIT
 
     MUSIC_DIR = music_dir
@@ -460,19 +480,17 @@ def run_classifier(
     AI_THRESHOLD = ai_threshold
     WEIGHT_AI = weight_ai
     WEIGHT_NET = weight_net
-    MAX_SAMPLE = max_sample
     NET_LIMIT = net_limit
 
     if log:
         set_logger(log)
 
+    logger.info("读取本地歌曲\n")
     songs = load_music(MUSIC_DIR, log=logger)
     logger.info(f"本地歌曲:{len(songs)}\n")
 
-    [songs, artist_best] = classify(songs)
+    songs = classify(songs)
     save(songs)
-    if USE_ARTIST:
-        save_artist(artist_best)
 
     SonglistCache.save()
     logger.info("分类完成")

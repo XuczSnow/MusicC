@@ -23,7 +23,7 @@ def normalize(text):
 def build_local_index(songs):
     index = {}
     for s in songs:
-        key = normalize(s["title"] + s["artist"])
+        key = normalize(s["title"] + split_artists(s["artist"])[0])
         index[key] = s
     return index
 
@@ -31,7 +31,7 @@ def build_local_index(songs):
 def match_local(online, index):
     result = []
     for s in online:
-        key = normalize(s["title"] + s["artist"])
+        key = normalize(s["title"] + split_artists(s["artist"])[0])
         if key in index:
             result.append(index[key])
     return result
@@ -79,7 +79,7 @@ def save_playlist_cover(
         return None
 
 KeySLCache = JsonCache("cahce/songlist_cache_key.json")
-SonglistCache = JsonCache("cahce/songlist_cache.json", expire_days=100)
+SonglistCache = JsonCache("cahce/songlist_cache.json")
 search_cnt = 0
 
 # ================= 平台实现 =================
@@ -120,6 +120,7 @@ def get_netease_multi(keyword, list_limit=30, platform="all"):
         source = p["source"]
         cover = p["cover"] 
         play_cnt = p.get("play_count", 0)
+        track_cnt = p.get("track_count", 0)
 
         if source != platform and platform != "all":
             continue
@@ -127,12 +128,11 @@ def get_netease_multi(keyword, list_limit=30, platform="all"):
         if list_count == list_limit:
             break
 
-        if contain_all_dirtydata(pname, DIRTY_PLAYLIST_RULES) or len(pname) < 10:
-            logger.info(f"    脏数据，忽略歌单: {pname}")
+        if is_dirty_playlist(pname, play_cnt, track_cnt):
             continue
-        elif play_cnt < 10000 and play_cnt != 0:
-            logger.info(f"    播放较少（{play_cnt}），忽略歌单: {pname}")
-            continue
+        elif play_cnt == 0:
+            if random.random() > 0.5:
+                continue
         else:
             list_count += 1
             logger.info(f"    读取歌单: {pname}")
@@ -175,7 +175,7 @@ def get_netease_multi(keyword, list_limit=30, platform="all"):
         except Exception as e:
             logger.exception(e)
     
-    if search_cnt%100 == 0:
+    if search_cnt%100 == 0 and search_cnt != 0:
         logger.info(f"    已网络处理 {search_cnt} 个网络请求，请等待10秒~\n")
         time.sleep(10)
 
@@ -241,12 +241,12 @@ def generate_netease_multi(keyword, songs, limit, platform = "all", min_limit=2)
 
         from pypinyin import lazy_pinyin, Style
         
-        first = lazy_pinyin(
-            pname[0],
-            style=Style.FIRST_LETTER
-        )[0]
+        first = lazy_pinyin(pname, style=Style.FIRST_LETTER)
+        for i in first:
+            if i.isalpha():
+                break
 
-        save_playlist(f"{first.upper()}_{pname}_{source}", matched, p["cover"])
+        save_playlist(f"{i.upper()}_{pname}_{source}", matched, p["cover"])
 
         logger.info(f"    匹配: {len(matched)} / {len(p['songs'])}\n")
 
@@ -466,7 +466,7 @@ def create_net_page(parent):
                         logger.info(f"  {t}")
 
                         generate_netease_multi(
-                            keyword=keywords,
+                            keyword=" ".join(keywords),
                             songs=songs,
                             limit=limit,
                             min_limit = min_hj,
@@ -480,7 +480,7 @@ def create_net_page(parent):
                     logger.info(f"{group} - {tag}")
 
                     generate_netease_multi(
-                        keyword=keywords,
+                        keyword=" ".join(keywords),
                         songs=songs,
                         limit=limit,
                         min_limit = min_hj,
@@ -488,7 +488,7 @@ def create_net_page(parent):
                     )
             # ================= 随机歌曲 =================
             elif mode_var.get() == "local":
-                page = int((limit-1)/10)+1
+                page = int((limit-1)/5)+1
                 num_song = len(songs)
                 label_en = [0]*num_song
                 loop_count = (page if num_song > page else num_song)
@@ -509,7 +509,7 @@ def create_net_page(parent):
                     generate_netease_multi(
                         keyword=keywords,
                         songs=songs,
-                        limit=10,
+                        limit=5,
                         min_limit = min_hj,
                         platform = platform
                     )

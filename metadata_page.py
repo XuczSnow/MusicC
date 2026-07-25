@@ -90,7 +90,7 @@ def fetch_song_meta(title, artist="", plat="kugou", date_en = 1):
         if not s:
             return None
         year = s.get("year")
-        lyric = s.get("lyrics")
+        lyric = s.get("synced_lyrics")
         s["cover"] = s.get("cover_url")
     else:
         try:

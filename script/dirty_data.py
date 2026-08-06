@@ -380,6 +380,11 @@ def is_dirty_artist(artist):
 def is_dirty_lyric(lyric):
     if len(lyric) < 100:
         return True
+    elif not re.search(r'\[\d{1,2}:\d{2}(?:\.\d{1,3})?\]',lyric):
+        return True
+    else:
+        return False
+        
     
 def is_dirty_playlist(pname, play_cnt, track_cnt):
     if contain_all_dirtydata(pname, DIRTY_PLAYLIST_RULES) or len(pname) < 7:

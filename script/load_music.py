@@ -208,7 +208,7 @@ def get_song_info(path:str, type:str):
 
         if type == "flac":
             duration = int(audio.info.length)
-            lyric = clean_text(str(audio.get("lyrics", [""])[0]))
+            lyric = str(audio.get("lyrics", [""])[0])
             cover = True if audio.pictures else False
         elif type == "mp3":
             audio = MP3(path)
@@ -216,7 +216,7 @@ def get_song_info(path:str, type:str):
             if audio.tags:
                 for tag in audio.tags:
                     if tag.startswith("USLT"):
-                        lyric = clean_text(str(audio.tags[tag]))
+                        lyric = str(audio.tags[tag])
                         break
             cover = True if audio.tags.getall("APIC") else False
             
@@ -237,6 +237,8 @@ def get_song_info(path:str, type:str):
             logger.warning(f"lyric: {lyric} 为脏数据，忽略")
             overwrite = True
             lyric = ""
+        else:
+            lyric = clean_text(lyric)
         
         # 如果获取不到，从文件名获取
         res = extract_song_artist(path)

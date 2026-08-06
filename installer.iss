@@ -3,7 +3,7 @@
 ; Non-commercial use only
 
 #define MyAppName "AI Music Classifier"
-#define MyAppVersion "1.1.0"
+#define MyAppVersion "1.1.1"
 #define MyAppPublisher "Xucz"
 #define MyAppURL "http://www.xuczsnow.cc.cd/"
 #define MyAppExeName "AI Music Classifier.exe"

@@ -161,7 +161,7 @@ def fetch_song_meta(title, artist="", plat="kugou", date_en = 1):
                 lyric =  ""
             else:
                 lyric = lyric_data["data"].get("lyric", "")
-                
+                       
             if date_en:
                 year = get_year_from_netease(s.get("name", title), s.get("artist", artist))
                 
@@ -239,11 +239,10 @@ def rewrite_songs(overwrite, song, meta, type, pixel=800):
         else:
             logger.info("    -> 没有获取到 album")
 
-    if overwrite:
+    if overwrite or not song.get("year"):
         if meta["year"] != '':
-            if meta["year"] < song.get("year", "9999"):
-                logger.info(f"    -> 重写 date: {meta["year"]}")
-                audio["date"] = meta["year"]
+            logger.info(f"    -> 重写 date: {meta["year"]}")
+            audio["date"] = meta["year"]
         else:
             logger.info("    -> 没有获取到 date")        
     

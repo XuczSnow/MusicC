@@ -461,16 +461,16 @@ if __name__ == "__main__":
     from script.start_service import *
     import threading
 
-    bottom_label = ctk.CTkLabel(
-    app,
-    text="初始化中..."
-    )
+    # bottom_label = ctk.CTkLabel(
+    # app,
+    # text="初始化中..."
+    # )
 
-    bottom_label.pack(side="right")
+    # bottom_label.pack(side="right")
 
-    threading.Thread(
-        target=lambda: start_go_music_api(logger, bottom_label),
-        daemon=True
-    ).start()
+    # threading.Thread(
+    #     target=lambda: start_go_music_api(logger, bottom_label),
+    #     daemon=True
+    # ).start()
 
     app.mainloop()

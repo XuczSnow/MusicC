@@ -1,697 +1,187 @@
-import time
+# metadata_page.py — 元数据增强页面（GUI 壳 + CLI 入口）
+# 核心逻辑由 metadata_core 提供；本文件仅负责 UI 与入口分发。
+# 双模式：带命令行参数 → CLI；无参数（或 --gui）→ GUI。
+import sys
 import threading
-import requests
 
 import customtkinter as ctk
 
-from tkinter import filedialog
-from datetime import datetime
+from script.music.music_tag import MUSIC_PLATFARM
+from script.common.logger import AppLogger
+from script.ui.widget_factory import (
+    folder_picker_row,
+    page_shell,
+    section_frame,
+    log_box,
+    status_label,
+    action_button,
+)
 
-from script.load_music import *
-from script.music_tag import *
-from script.music_fetcher import MusicFetcher
-from script.logger import AppLogger
-from script.cache_manager import JsonCache
-
-from mutagen.easyid3 import EasyID3
-from mutagen.flac import FLAC, Picture
-from mutagen.id3 import USLT, APIC
-from mutagen.mp3 import MP3
-
-from PIL import Image
-from io import BytesIO
-
-BASE_URL = "http://localhost:8080/api/v1/music"
 logger = None
 
-HEADERS = {
-    "Referer": "http://music.163.com",
-    "User-Agent": "Mozilla/5.0"
-}
 
-def get_year_from_netease(title, artist):
-    keyword = f"{title} {artist}".strip()
-    try:
-        # 1️⃣ 搜索歌曲
-        r = requests.get(
-            "http://music.163.com/api/search/get",
-            params={
-                "s": keyword,
-                "type": 1,
-                "limit": 1
-            },
-            headers=HEADERS,
-            timeout=5
-        )
+def create_metadata_page(parent, logger=None):
+    frame = page_shell(parent)
 
-        data = r.json()
-        song_id = data["result"]["songs"][0]["id"]
+    # 路径选择
+    path_entry = folder_picker_row(frame, placeholder="选择音乐目录")
 
-        # 2️⃣ 获取歌曲详情
-        r2 = requests.get(
-            "http://music.163.com/api/song/detail",
-            params={"ids": f"[{song_id}]"},
-            headers=HEADERS,
-            timeout=5
-        )
+    # 选项（第 1 行：覆盖类）
+    option_frame = section_frame(frame, "选项")
+    row1 = ctk.CTkFrame(option_frame, fg_color="transparent")
+    row1.pack(fill="x", padx=4)
 
-        songs = r.json()["result"]["songs"]
-
-        best_year = ""
-
-        for song in songs:
-            pt = song["album"].get("publishTime", 0)
-            if pt:
-                year = datetime.fromtimestamp(pt / 1000).strftime("%Y-%m-%d")
-                best_year = year
-                break
-
-        return best_year
-
-    except Exception as e:
-        logger.exception(e)
-
-    return ''
-
-brainz = MusicFetcher(logger)
-BrainzSCache = JsonCache("cahce/song_cache_brainz.json")
-NetSCache = JsonCache("cahce/song_cache_net.json")
-
-def fetch_song_meta(title, artist="", plat="kugou", date_en = 1):
-  
-    keyword = f"{title} {artist}".strip()
-    
-    lyric = ""
-    year = ""
-    
-    if plat == "brainz":
-        s = brainz.build_song(title, artist)
-        BrainzSCache.set(f"{artist}-{title}", s)
-        if not s:
-            return None
-        year = s.get("year")
-        lyric = s.get("synced_lyrics")
-        s["cover"] = s.get("cover_url")
-    else:
-        try:
-            r = requests.get(
-                f"{BASE_URL}/search",
-                params={
-                    "keyword": keyword,
-                    "page": 1,
-                    "size": 1
-                },
-                timeout=5,
-                proxies={"http": None, "https": None},
-            )
-
-            data = r.json().get("data", [])
-
-            songs = data.get("songs", [])
-            if not songs and isinstance(data.get("data"), dict):
-                songs = data["data"].get("songs", [])
-
-            if not songs:
-                return None
-            
-            s = {}
-
-            def str_verify(s1, s2):
-                return s1.lower() in s2.lower() or s2.lower() in s1.lower()
-
-            for song in songs:
-                if song["source"] == plat:
-                    s_artists = split_artists(song["artist"])
-                    s_name = song["name"]
-                    if str_verify(s_name, title) and str_verify(s_artists[0], artist):
-                        s = song
-                        break
-            
-            if s == {}:
-                logger.warning("    对应平台未获取到信息，全平台搜索")
-                for song in songs:
-                    s_artists = split_artists(song["artist"])
-                    s_name = song["name"]
-                    if str_verify(s_name, title) and str_verify(s_artists[0], artist):
-                        s = song
-                        break
-            
-            if s == {}: 
-                return None
-            
-            NetSCache.set(f"{artist}-{title}", s)
-            s["cover"] = s.get("cover").replace("240/","")
-            
-            song_id = s.get("id")
-            # platform = s.get("platform", "qq")
-
-            time.sleep(0.5)
-
-            lr = requests.get(
-                f"{BASE_URL}/lyric",
-                params={
-                    "id": song_id,
-                    "source": plat,
-                },
-                timeout=5,
-            )
-
-            lyric_data = lr.json()
-            if lyric_data.get("code") != 200:
-                lyric =  ""
-            else:
-                lyric = lyric_data["data"].get("lyric", "")
-                       
-            if date_en:
-                year = get_year_from_netease(s.get("name", title), s.get("artist", artist))
-                
-        except Exception as e:
-            logger.exception(e)
-
-    return {
-        "title": s.get("name", ""),
-        "artist": split_artists(s.get("artist", "")),
-        "album": s.get("album", ""),
-        "cover": s.get("cover"),
-        "year": year,
-        "lyric": lyric,
-    }
-
-
-def download_cover(url):
-    if not url:
-        return None
-
-    try:
-        return requests.get(url, timeout=15).content
-    except Exception as e:
-        logger.exception(e)
-        return None
-
-def make_flac_picture(img, max_size: int = 800) -> Picture:
-    """把任意图片转成 FLAC 能接受的 Picture 对象"""
-    pic = Picture()
-    pic.type = 3               # 封面（Front Cover）
-    pic.desc = "Front Cover"
- 
-    # 打开并压缩图片
-    with Image.open(img) as im:
-        im = im.convert("RGB")
-        if max(im.size) > max_size:
-            im.thumbnail((max_size, max_size), Image.LANCZOS)
- 
-        import io
-        buf = io.BytesIO()
-        im.save(buf, format="JPEG", quality=92)
-        pic.data = buf.getvalue()
-        pic.mime = "image/jpeg"
-        pic.width, pic.height = im.size
- 
-    return pic
-
-def rewrite_songs(overwrite, song, meta, type, pixel=800):
-
-    if type == "flac":
-        audio = FLAC(song["path"])
-    elif type == "mp3":
-        audio = EasyID3(song["path"])
-
-    # 基础数据
-    if overwrite or not song.get("title"):
-        if meta["title"] != '':
-            logger.info(f"    -> 重写 title: {meta["title"]}")
-            audio["title"] = meta["title"]
-        else:
-            logger.info("    -> 没有获取到 title")
-            
-
-    if overwrite or not song.get("artist"):
-        if meta["artist"] != '':
-            logger.info(f"    -> 重写 artist: {meta["artist"]}")
-            audio["artist"] = meta["artist"]
-        else:
-            logger.info("    -> 没有获取到 artist")
-
-    if overwrite or not song.get("album"):
-        if meta["album"] != '':
-            logger.info(f"    -> 重写 album: {meta["album"]}")
-            audio["album"] = meta["album"]
-        else:
-            logger.info("    -> 没有获取到 album")
-
-    if overwrite or not song.get("year"):
-        if meta["year"] != '':
-            logger.info(f"    -> 重写 date: {meta["year"]}")
-            audio["date"] = meta["year"]
-        else:
-            logger.info("    -> 没有获取到 date")        
-    
-    audio.save()
-    if type == "mp3":
-        audio = MP3(song["path"])
-
-    #歌词
-    if type == "flac":
-        if overwrite or not song.get("lyric"):
-            if meta.get("lyric") != "":
-                logger.info(f"    -> 重写 lyric")
-                audio["lyrics"] = meta["lyric"]
-            else:
-                logger.info("    -> 没有获取到 lyric")
-    elif type == "mp3":
-        if overwrite or not song.get("lyric"):
-            if meta.get("lyric") != "":
-                audio.tags.delall("USLT")
-                logger.info(f"    -> 重写 lyric")
-                audio.tags.add(USLT(encoding=3, text=meta["lyric"]))
-            else:
-                logger.info("    -> 没有获取到 lyric")
-                
-    #封面
-    if type == "flac":
-        if overwrite or not audio.pictures:
-            if meta.get("cover") != "":
-                cover = download_cover(meta.get("cover"))
-                if cover and "404" not in str(cover):
-                    logger.info("    -> 加入封面图片")
-                    pic = make_flac_picture(BytesIO(cover), max_size=pixel)
-                    audio.add_picture(pic)
-                else:
-                    logger.info("    -> 没有获取到 封面")
-            else:
-                logger.info("    -> 没有获取到 封面")
-    elif type == "mp3":
-        if overwrite or not audio.tags.getall("APIC"):
-            if meta.get("cover") != "":
-                cover = download_cover(meta.get("cover"))
-                if cover:
-                    logger.info(f"    -> 加入封面图片")
-                    audio.tags.add(APIC(
-                        encoding=3,
-                        mime="image/jpeg",
-                        type=3,
-                        desc="Cover",
-                        data=make_flac_picture(BytesIO(cover), max_size=pixel).data,
-                    ))
-                else:
-                    logger.info("    -> 没有获取到 封面")
-            else:
-                logger.info("    -> 没有获取到 封面")
-    audio.save()
-    return audio
-
-def rewrite_date(song, meta, type):
-    if type == "flac":
-        audio = FLAC(song["path"])
-    elif type == "mp3":
-        audio = EasyID3(song["path"])
-    year = get_year_from_netease(song["title"], song["artist"])
-    if year != '':
-        if year < song.get("year", "9999"):
-            logger.info(f"    -> 重写 date: {year}")
-            audio["date"] = year
-            audio.save()
-        else:
-            logger.info("    -> 无需重写 date")
-    else:
-        logger.info("    -> 没有获取到 date")        
-
-def write_song_metadata(song, meta, pixel=800, overwrite=False):
-    path = song["path"]
-
-    if path.lower().endswith(".flac"):
-        audio = rewrite_songs(overwrite, song, meta, "flac", pixel)
-    elif path.lower().endswith(".mp3"):
-        audio = rewrite_songs(overwrite, song, meta, "mp3", pixel)
-    else:
-        return f"不支持的文件类型: {path}"
-
-    return True
-    
-def create_metadata_page(parent):
-    global logger
-    
-    frame = ctk.CTkFrame(parent)
-
-    path_frame = ctk.CTkFrame(frame)
-    path_frame.pack(fill="x", padx=20, pady=10)
-
-    path_entry = ctk.CTkEntry(
-        path_frame,
-        placeholder_text="选择音乐目录"
-    )
-    path_entry.pack(side="left", fill="x", expand=True, padx=10, pady=10)
-
-    def select_folder():
-        folder = filedialog.askdirectory()
-        if folder:
-            path_entry.delete(0, "end")
-            path_entry.insert(0, folder)
-    
-    ctk.CTkButton(
-        path_frame,
-        text="浏览",
-        width=80,
-        command=select_folder
-    ).pack(side="right", padx=10)
-
-    option_frame = ctk.CTkFrame(frame)
-    option_frame.pack(fill="x", padx=20, pady=10)
-
-    # 是否覆盖
     overwrite_var = ctk.BooleanVar(value=False)
-
-    ctk.CTkCheckBox(
-        option_frame,
-        text="覆盖原始元数据",
-        variable=overwrite_var
-    ).pack(side="left", padx=10, pady=5)
-
+    ctk.CTkCheckBox(row1, text="覆盖原始元数据", variable=overwrite_var).pack(side="left", padx=10, pady=5)
     overwrite_dirty_var = ctk.BooleanVar(value=False)
-
-    ctk.CTkCheckBox(
-        option_frame,
-        text="强制覆盖脏数据",
-        variable=overwrite_dirty_var
-    ).pack(side="left", padx=10, pady=5)
-
+    ctk.CTkCheckBox(row1, text="强制覆盖脏数据", variable=overwrite_dirty_var).pack(side="left", padx=10, pady=5)
     overwrite_date_var = ctk.BooleanVar(value=False)
+    ctk.CTkCheckBox(row1, text="强制更新年份", variable=overwrite_date_var).pack(side="left", padx=10, pady=5)
 
-    ctk.CTkCheckBox(
-        option_frame,
-        text="强制更新年份",
-        variable=overwrite_date_var
-    ).pack(side="left", padx=10, pady=5)
+    # 选项（第 2 行：AI 类，另起一行）
+    ai_row = ctk.CTkFrame(option_frame, fg_color="transparent")
+    ai_row.pack(fill="x", padx=4, pady=(2, 0))
 
+    ai_sync_var = ctk.BooleanVar(value=False)
+    ctk.CTkCheckBox(ai_row, text="AI 同步（补时间戳）", variable=ai_sync_var).pack(side="left", padx=10, pady=5)
+    ai_fill_var = ctk.BooleanVar(value=False)
+    ctk.CTkCheckBox(ai_row, text="AI 增补（无歌词）", variable=ai_fill_var).pack(side="left", padx=10, pady=5)
 
-    # 平台选择
-    platform_frame = ctk.CTkFrame(frame)
-    platform_frame.pack(fill="x", padx=20, pady=10)
+    # 备份：把修改过的歌曲复制到 源目录/bak/
+    backup_var = ctk.BooleanVar(value=False)
+    ctk.CTkCheckBox(ai_row, text="备份修改歌曲", variable=backup_var).pack(side="left", padx=10, pady=5)
 
-    ctk.CTkLabel(
-        platform_frame,
-        text="元数据来源平台"
-    ).pack(side="left", padx=5)
-
+    # 平台与参数
+    platform_frame = section_frame(frame, "平台与参数")
+    ctk.CTkLabel(platform_frame, text="元数据来源平台").pack(side="left", padx=5)
     platform_var = ctk.StringVar(value="brainz")
-
-    platform_menu = ctk.CTkOptionMenu(
+    ctk.CTkOptionMenu(
         platform_frame,
         values=["brainz"] + MUSIC_PLATFARM[1:],
         variable=platform_var
-    )
+    ).pack(side="left", padx=5)
 
-    platform_menu.pack(side="left", padx=5)
-
-    pixel_limit = ctk.CTkEntry(platform_frame)
+    # 图像最大分辨率（输入框在左，文字在右，避免右侧被挤）
+    pixel_limit = ctk.CTkEntry(platform_frame, width=80)
     pixel_limit.insert(0, "800")
-    pixel_limit.pack(side="right")
+    pixel_limit.pack(side="right", padx=5)
+    ctk.CTkLabel(platform_frame, text="图像最大分辨率").pack(side="right", padx=5)
 
-    ctk.CTkLabel(
-        platform_frame,
-        text="图像最大分辨率: "
-    ).pack(side="right", padx=5)
+    # 歌词偏移（ms）：正=滞后，负=提前；0 表示不偏移
+    offset_frame = section_frame(frame, "歌词偏移")
+    ctk.CTkLabel(offset_frame, text="歌词时间偏移 (ms)").pack(side="left", padx=5)
+    ctk.CTkLabel(offset_frame, text="正数=滞后  负数=提前  0=不偏移").pack(side="left", padx=5)
+    lrc_offset = ctk.CTkEntry(offset_frame, width=80)
+    lrc_offset.insert(0, "0")
+    lrc_offset.pack(side="right", padx=5)
 
-    status_label = ctk.CTkLabel(frame, text="状态：等待开始")
-    status_label.pack(pady=5)
-
-    log_box = ctk.CTkTextbox(frame)
-    log_box.pack(fill="both", expand=True, padx=20, pady=10)
-    
-    logger = AppLogger(textbox=log_box)
-
-    def select_folder():
-        folder = filedialog.askdirectory()
-        if folder:
-            path_entry.delete(0, "end")
-            path_entry.insert(0, folder)
+    # 状态 + 日志
+    status = status_label(frame, "状态：等待开始")
+    log_widget = log_box(frame)
+    page_logger = AppLogger(textbox=log_widget)
+    globals()['logger'] = page_logger
 
     def start_task():
-        threading.Thread(target=worker, daemon=True).start()
-
-    def worker():
-        folder = path_entry.get().strip()
-
-        if not folder:
-            logger.warning("请先选择目录\n")
-            return
-        
         btn.configure(state="disabled")
+        status.configure(text="状态：运行中 🚀")
 
-        overwrite = overwrite_var.get()
-        overwrite_dirty = overwrite_dirty_var.get()
-        overwrite_date = overwrite_date_var.get()
-        plat = platform_var.get()
-        pixel = int(pixel_limit.get())
+        # 子线程写进度变量；主线程 after 轮询刷新（frame.after 非线程安全，不可在子线程调）
+        _shared = {"done": 0, "total": 1, "finished": False}
 
-        logger.info("扫描音乐库...")
-        songs = load_music(folder, log=logger)
+        def _worker():
+            from cores.metadata_core import run_metadata
+            folder = path_entry.get().strip()
+            if not folder:
+                page_logger.warning("请先选择目录\n")
+                _shared["finished"] = True
+                return
 
-        logger.info(f"共发现 {len(songs)} 首歌曲\n")
+            def progress_cb(done, total):
+                _shared["done"] = done
+                _shared["total"] = total or 1
 
-        total = len(songs)
-        song_cnt = 0
-
-        for index, song in enumerate(songs, start=1):
-
-
-            frame.after(
-                0,
-                lambda i=index: status_label.configure(
-                    text=f"状态：处理中 {i}/{total}"
-                )
+            run_metadata(
+                folder=folder,
+                plat=platform_var.get(),
+                overwrite=overwrite_var.get(),
+                overwrite_dirty=overwrite_dirty_var.get(),
+                overwrite_date=overwrite_date_var.get(),
+                pixel=int(pixel_limit.get()),
+                ai_sync=ai_sync_var.get(),
+                ai_fill=ai_fill_var.get(),
+                backup=backup_var.get(),
+                lrc_offset=int(lrc_offset.get() or 0),
+                log=page_logger,
+                progress_cb=progress_cb,
             )
+            _shared["finished"] = True
 
-            logger.info(f"    {song['artist']} - {song['title']}")
+        def _poll():
+            d, t, fin = _shared["done"], _shared["total"], _shared["finished"]
+            if d:
+                status.configure(text=f"状态：处理中 {d}/{t}")
+            if fin:
+                status.configure(text="状态：完成 ✅")
+                btn.configure(state="normal")
+            else:
+                frame.after(150, _poll)
 
-            info_list = ["title",
-                        "artist",
-                        "year",
-                        "lyric",
-                        "album",
-                        "cover"]
-            all_info = True
-            
-            for info in info_list:
-                if song[info] in [False, '', [], {}, -1]:
-                    all_info = False
-                    break
+        threading.Thread(target=_worker, daemon=True).start()
+        frame.after(150, _poll)
 
-            if all_info and not overwrite:
-                if overwrite_dirty and song["overwrite"]:
-                    logger.info("    有脏数据，尝试 Overwrite")
-                elif overwrite_date:
-                    logger.info("    其他信息完整，强制更新年份，尝试 Overwrite")
-                    rewrite_date(song, {}, song["path"].split(".")[-1])
-                    continue
-                else:
-                    logger.info("    跳过-歌曲信息完整\n")
-                    continue
-
-            meta = fetch_song_meta(song['title'], song['artist'], plat, date_en = 0 if song["year"] else 1)
-
-            if not meta:
-                logger.warning("    未获取到网络信息\n")
-                continue
-
-            result = write_song_metadata(
-                song,
-                meta,
-                pixel,
-                overwrite=overwrite|song["overwrite"] if overwrite_dirty else overwrite
-            )
-
-            if result is True:
-                logger.info("    更新成功\n")
-
-            song_cnt += 1
-            time.sleep(1)
-            if song_cnt%100 == 0:
-                logger.info(f"\n    已网络处理 {song_cnt} 首歌曲，请等待10秒~\n")
-                time.sleep(10)
-
-        BrainzSCache.save()
-        NetSCache.save()
-        frame.after(
-            0,
-            lambda: status_label.configure(text="状态：完成 ✅")
-        )
-
-        logger.info("所有歌曲处理完成, 重新载入歌曲\n")
-        load_music(folder, log=logger, reload=True)
-        btn.configure(state="enabled")
-
-    btn = ctk.CTkButton(
-        frame,
-        text="🚀 开始获取",
-        height=40,
-        command=start_task
-    )
-    btn.pack(pady=10)
-
+    btn = action_button(frame, "🚀 开始获取", start_task)
     return frame
 
 
-# class MetadataEnhancerApp(ctk.CTk):
+# ---------------- 双模式入口 ----------------
+def _cli(args):
+    import argparse
 
-#     def __init__(self):
-#         super().__init__()
+    p = argparse.ArgumentParser(description="元数据增强（核心 CLI）")
+    p.add_argument("music_dir", help="音乐目录")
+    p.add_argument("--plat", default="brainz", choices=["brainz"] + MUSIC_PLATFARM[1:])
+    p.add_argument("--overwrite", action="store_true", help="覆盖原始元数据")
+    p.add_argument("--overwrite-dirty", action="store_true", help="强制覆盖脏数据")
+    p.add_argument("--overwrite-date", action="store_true", help="强制更新年份")
+    p.add_argument("--pixel", type=int, default=800, help="封面最大分辨率")
+    p.add_argument("--ai-sync", action="store_true", help="AI 同步（补时间戳）")
+    p.add_argument("--ai-fill", action="store_true", help="AI 增补（无歌词）")
+    p.add_argument("--backup", action="store_true", help="备份修改过的歌曲到 源目录/bak")
+    p.add_argument("--lrc-offset", type=int, default=0, help="歌词偏移(ms)，正=滞后 负=提前")
+    p.add_argument("--gui", action="store_true", help="忽略参数，启动 GUI")
+    ns = p.parse_args(args)
 
-#         self.title("🎵 歌曲元数据增强")
-#         self.geometry("900x700")
+    if ns.gui:
+        _gui()
+        return
 
-#         ctk.CTkLabel(
-#             self,
-#             text="🎵 本地音乐元数据增强",
-#             font=ctk.CTkFont(size=24, weight="bold")
-#         ).pack(pady=10)
+    from cores.metadata_core import run_metadata
+    run_metadata(
+        folder=ns.music_dir,
+        plat=ns.plat,
+        overwrite=ns.overwrite,
+        overwrite_dirty=ns.overwrite_dirty,
+        overwrite_date=ns.overwrite_date,
+        pixel=ns.pixel,
+        ai_sync=ns.ai_sync,
+        ai_fill=ns.ai_fill,
+        backup=ns.backup,
+        lrc_offset=ns.lrc_offset,
+    )
 
-#         path_frame = ctk.CTkFrame(self)
-#         path_frame.pack(fill="x", padx=20, pady=10)
 
-#         self.path_entry = ctk.CTkEntry(
-#             path_frame,
-#             placeholder_text="选择音乐目录"
-#         )
-#         self.path_entry.pack(side="left", fill="x", expand=True, padx=10, pady=10)
-
-#         ctk.CTkButton(
-#             path_frame,
-#             text="浏览",
-#             command=self.select_folder
-#         ).pack(side="right", padx=10)
-
-#         option_frame = ctk.CTkFrame(self)
-#         option_frame.pack(fill="x", padx=20)
-
-#         self.overwrite_var = ctk.BooleanVar(value=False)
-
-#         ctk.CTkCheckBox(
-#             option_frame,
-#             text="覆盖原始元数据",
-#             variable=self.overwrite_var
-#         ).pack(anchor="w", padx=10, pady=10)
-
-#         self.status_label = ctk.CTkLabel(self, text="状态：等待开始")
-#         self.status_label.pack(pady=5)
-
-#         self.log_box = ctk.CTkTextbox(self)
-#         self.log_box.pack(fill="both", expand=True, padx=20, pady=10)
-
-#         ctk.CTkButton(
-#             self,
-#             text="🚀 开始增强",
-#             height=40,
-#             command=self.start_task
-#         ).pack(pady=10)
-
-#     def log(self, msg):
-#         self.after(0, lambda: (
-#             self.log_box.insert("end", msg + "\n"),
-#             self.log_box.see("end")
-#         ))
-
-#     def select_folder(self):
-#         folder = filedialog.askdirectory()
-#         if folder:
-#             self.path_entry.delete(0, "end")
-#             self.path_entry.insert(0, folder)
-
-#     def start_task(self):
-#         threading.Thread(target=self.worker, daemon=True).start()
-
-#     def worker(self):
-#         folder = self.path_entry.get().strip()
-
-#         if not folder:
-#             self.log("❌ 请先选择目录")
-#             return
-
-#         overwrite = self.overwrite_var.get()
-
-#         self.log("🔍 扫描音乐库...")
-#         songs = load_music(folder)
-
-#         self.log(f"✅ 共发现 {len(songs)} 首歌曲")
-
-#         total = len(songs)
-
-#         for index, song in enumerate(songs, start=1):
-
-#             self.after(
-#                 0,
-#                 lambda i=index: self.status_label.configure(
-#                     text=f"状态：处理中 {i}/{total}"
-#                 )
-#             )
-
-#             self.log(f"🎵 {song['title']} - {song['artist']}")
-
-#             meta = fetch_song_meta(song['title'], song['artist'])
-
-#             if not meta:
-#                 self.log("⚠️ 未获取到网络信息")
-#                 continue
-
-#             result = write_song_metadata(
-#                 song,
-#                 meta,
-#                 overwrite=overwrite
-#             )
-
-#             if result is True:
-#                 self.log("✅ 更新成功")
-#             else:
-#                 self.log(f"❌ 更新失败: {result}")
-
-#         self.after(
-#             0,
-#             lambda: self.status_label.configure(text="状态：完成 ✅")
-#         )
-
-#         self.log("🎉 所有歌曲处理完成")
+def _gui():
+    from _bootstrap import bootstrap_page
+    bootstrap_page(
+        page_title="🎧 Metadata Page",
+        create_fn=create_metadata_page,
+        page_logger=logger,
+        start_api=True,
+    )
 
 
 if __name__ == "__main__":
-    # ctk.set_appearance_mode("dark")
-    # ctk.set_default_color_theme("green")
-
-    # app = MetadataEnhancerApp()
-    # app.mainloop()
-
-    # ✅ 全局主题
-    ctk.set_appearance_mode("dark")
-    ctk.set_default_color_theme("green")
-
-    # ================= 窗口 =================
-    app = ctk.CTk()
-    app.title("AI Music Classifier")
-    app.geometry("600x800")
-
-    # ================= 标题 =================
-    title = ctk.CTkLabel(
-        app,
-        text="🎧 Net Metadate Page",
-        font=ctk.CTkFont(size=20, weight="bold")
-    )
-    title.pack(pady=10)
-    
-    net_frame = create_metadata_page(app)
-    net_frame.pack(fill="both", expand=True)
-
-    from script.start_service import *
-    import threading
-
-    bottom_label = ctk.CTkLabel(
-    app,
-    text="初始化中..."
-    )
-
-    bottom_label.pack(side="right")
-
-    threading.Thread(
-        target=lambda: start_go_music_api(logger, bottom_label),
-        daemon=True
-    ).start()
-
-    app.mainloop()
+    if len(sys.argv) > 1:
+        _cli(sys.argv[1:])
+    else:
+        _gui()

@@ -4,40 +4,48 @@ import time
 import shutil
 import requests
 
+# 允许从 cores/ 目录直接运行（CLI）：把项目根加入 sys.path
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+
 from collections import defaultdict
+from dataclasses import dataclass
 
-from script.music_tag import *
-from script.load_music import *
-from script.cache_manager import JsonCache
-from script.logger import AppLogger
+from script.music.music_tag import *
+from script.music.load_music import *
+from script.common.cache_manager import JsonCache
+from script.common.logger import AppLogger
+from script.common.rate_limiter import RateLimiter, api_limiter
+from script.music.playlist_service import fetch_playlist_songs, SonglistCache
 
-from sklearn.metrics.pairwise import cosine_similarity
+# ✅ 启动性能：sklearn 首次导入开销大（~1s），改为惰性加载——
+#    仅在真正执行 AI 语义分类时才 import，启动期零成本
+_cosine_similarity = None
+
+def _get_cosine_similarity():
+    global _cosine_similarity
+    if _cosine_similarity is None:
+        from sklearn.metrics.pairwise import cosine_similarity
+        _cosine_similarity = cosine_similarity
+    return _cosine_similarity
 
 # ---------------- CONFIG ----------------
-MUSIC_DIR = "."
-USE_AI = True
-USE_NET = True
-USE_ARTIST = True
-USE_ERA = True
-
-AI_THRESHOLD = 0.4
-WEIGHT_AI = 0
-WEIGHT_NET = 1
-# MAX_SAMPLE = 1000
-NET_LIMIT = 10
-
-if len(sys.argv) > 1:
-    MUSIC_DIR = sys.argv[1]
-    USE_AI = sys.argv[2] == "True"
-    USE_NET = sys.argv[3] == "True"
-    USE_ARTIST = sys.argv[4] == "True"
-    USE_ERA = sys.argv[5] == "True"
-
-    AI_THRESHOLD = float(sys.argv[6])
-    WEIGHT_AI = int(sys.argv[7])
-    WEIGHT_NET = int(sys.argv[8])
-    NET_LIMIT = float(sys.argv[9])
-    # MAX_SAMPLE = int(sys.argv[9])
+@dataclass
+class Config:
+    """分类器全部运行参数（替代原先 9 个模块级全局变量）"""
+    music_dir: str = "."
+    use_ai: bool = True
+    use_net: bool = True
+    use_artist: bool = True
+    use_era: bool = True
+    use_audio: bool = False        # 音频（PANNs）分类开关
+    ai_threshold: float = 0.4
+    audio_threshold: float = 0.3   # PANNs 概率阈值
+    weight_ai: int = 0
+    weight_audio: int = 1
+    weight_net: int = 1
+    net_limit: float = 10
 
 # ===== 全局日志函数 =====
 logger = AppLogger()
@@ -57,10 +65,20 @@ def get_model():
     global model
     global tag_embeddings
 
-    if model != None:
+    if model is not None:
         return model
 
     MODEL_PATH = resource_path("./models/models--sentence-transformers--all-MiniLM-L6-v2")
+    MODEL_ID = "sentence-transformers/all-MiniLM-L6-v2"
+    has_config = os.path.isfile(os.path.join(MODEL_PATH, "config.json"))
+    has_weights = any(
+        os.path.isfile(os.path.join(MODEL_PATH, name))
+        for name in ("model.safetensors", "pytorch_model.bin")
+    )
+    if not (has_config and has_weights):
+        from huggingface_hub import snapshot_download
+
+        snapshot_download(repo_id=MODEL_ID, local_dir=MODEL_PATH)
     model = SentenceTransformer(MODEL_PATH)
 
 # ---------------- AI标签语义 ----------------
@@ -99,22 +117,18 @@ def get_model():
 
 # ---------------- 在线云搜索 ----------------
 TitleSLCache = JsonCache("cahce/songlist_cache_title.json")
-SonglistCache = JsonCache("cahce/songlist_cache.json")
-search_cnt = 0
+# SonglistCache 由 script.playlist_service 统一管理（与 fetch_playlist_songs 共用同一实例）
 
-def wy_search(title, artist, album):
-    global search_cnt
+# ✅ 限流器：实际发请求前等待，保证间隔 >= min_interval
+# （缓存命中不发请求，因此不占用限流额度）
+class_limiter = api_limiter
+
+def wy_search(title, artist, album, cfg: Config):
 
     BASE = "http://localhost:8080/api/v1"
     url = f"{BASE}/music/search"
     pnames = []
 
-    if search_cnt%100 == 0 and search_cnt != 0:
-        logger.info(f"    已网络处理 {search_cnt} 首歌曲，请等待10秒~\n")
-        time.sleep(10)
-    else:
-        time.sleep(0.5)
-        
     plylist = []
     try:
         params = {
@@ -122,10 +136,14 @@ def wy_search(title, artist, album):
             "type": "playlist"}
         data = TitleSLCache.get(title)
         if not data:
-            search_cnt +=1
-            r = requests.get(url, params=params)
+            class_limiter.wait()
+            r = requests.get(url, params=params, timeout=30)
+            # 非 JSON 响应（网关拦截/错误页）时跳过，避免 .json() 崩溃
+            if "json" not in (r.headers.get("Content-Type") or "").lower() or not r.text:
+                logger.warning(f"    /music/search 非 JSON 响应（HTTP {r.status_code}），跳过网络标签\n")
+                return
             data = r.json().get("data",[])
-            TitleSLCache.set(artist, data)
+            TitleSLCache.set(title, data)
         plylist = data.get("playlists",[])
         plylist = sorted(plylist, key=lambda x: x["play_count"], reverse=True)
         
@@ -145,25 +163,10 @@ def wy_search(title, artist, album):
         else:
             pl_cnt += 1
             logger.info(f"    读取歌单: {pname}")
-            
-        try:
-            songs_raw = SonglistCache.get(f"{pname}_{pid}")
-            if not songs_raw:
-                r2 = requests.get(
-                    f"{BASE}/playlist/detail",
-                    params={
-                        "id": pid,
-                        "source": source
-                    }
-                )
 
-                detail = r2.json()
-                if detail:
-                    songs_raw = detail.get("data", [])
-                    SonglistCache.set(f"{pname}_{pid}", songs_raw)
-        except Exception as e:
-            logger.exception(e)
-            
+        # ✅ 复用共享抓取（缓存 + 限流 + 请求，内部已捕获异常并返回 []）
+        songs_raw = fetch_playlist_songs(pid, source, pname, logger)
+
         def is_similar(s1, s2):
             return (s1 in s2) or (s2 in s1)
         
@@ -173,11 +176,12 @@ def wy_search(title, artist, album):
                     if play_cnt == 0:
                         pscore = 1
                     else:
-                        pscore = play_cnt/100/track_cnt
-                    pnames.append({"pname":pname, "pscore":pscore})
+                        # ✅ 防除零：track_cnt 为 0 时用 play_cnt 作分档
+                        pscore = play_cnt / 100 / track_cnt if track_cnt > 0 else 1.0
+                    pnames.append({"pname": pname, "pscore": pscore})
                     continue
                 
-        if pl_cnt > NET_LIMIT:
+        if pl_cnt > cfg.net_limit:
             break
 
     return pnames
@@ -198,25 +202,26 @@ def extract_tags(name):
     return result
 
 # ---------------- AI语义标签 ----------------
-def ai_tags(title, artist):
+def ai_tags(title, artist, cfg: Config):
 
     model = get_model()
 
     text = f"{title} {artist}"
     emb = model.encode(text)
 
+    cosine_sim = _get_cosine_similarity()
     results = []
 
     for tag, tag_emb in tag_embeddings.items():
 
-        score = cosine_similarity([emb], [tag_emb])[0][0]
+        score = cosine_sim([emb], [tag_emb])[0][0]
 
-        if score > AI_THRESHOLD:
+        if score > cfg.ai_threshold:
             results.append(("AI", tag, score))
 
     return results
 
-def ai_tags_from_lyric(lyric):
+def ai_tags_from_lyric(lyric, cfg: Config):
 
     model = get_model()
     if not lyric:
@@ -224,52 +229,75 @@ def ai_tags_from_lyric(lyric):
 
     emb = model.encode(lyric)
 
+    cosine_sim = _get_cosine_similarity()
     results = []
 
     for tag, tag_emb in tag_embeddings.items():
 
-        score = cosine_similarity([emb], [tag_emb])[0][0]
+        score = cosine_sim([emb], [tag_emb])[0][0]
 
-        if score > AI_THRESHOLD:
+        if score > cfg.ai_threshold:
             results.append(("AI", tag, score))
 
     return results
 
 # ---------------- 分类 ----------------
-def classify(songs):
+def classify(songs, cfg: Config):
     logger.info("歌曲分类中...")
     total = len(songs)
     song_cnt = 0
-    
+
+    # ✅ 每首歌 rank 归零，避免重复运行时累加翻倍
+    for s in songs:
+        s["rank"] = 0
+
     for s in songs:
         song_cnt += 1
         keyword = f"{s['title']} {s['artist']}"
         logger.info(f"  状态：处理中 {song_cnt}/{total}--->分析:"+keyword)
 
-        if USE_NET:
-            net_tags = []
+        if cfg.use_net:
             logger.info("    在线分类中...")
-            names = wy_search(s['title'], s['artist'], s['album'])
-            
-            tags = []
+            names = wy_search(s['title'], s['artist'], s['album'], cfg)
+
             # ✅ 歌单标签
+            tags = []
             for n in names:
                 tags += extract_tags(n)
-            
+
             for tag in tags:
-                if tag == []:
-                    continue
                 s["net_tags"][tag["tag"]]["score"] += tag["score"]
         
-        if USE_AI:
-            # ✅ AI标签
-            # ai = ai_tags(s["title"], s["artist"])
+        if cfg.use_ai:
+            # ✅ AI标签：有歌词用歌词语义；无歌词回退到 标题+歌手 语义（纯音乐也能打标）
             logger.info("    AI分类中...\n")
             lyric = s["lyric"]
-            ai = ai_tags_from_lyric(lyric)
+            if lyric:
+                ai = ai_tags_from_lyric(lyric, cfg)
+            else:
+                ai = ai_tags(s["title"], s["artist"], cfg)
 
             for source, tag, ai_score in ai:
                 s["ai_tags"][f"AI_{tag}"]["score"] += ai_score
+
+        if cfg.use_audio:
+            # ✅ 音频（PANNs）标签：对所有歌推理，映射到中文标签
+            logger.info("    音频分类中...\n")
+            from cores.audio_classify import ai_tags_from_audio, get_cached, set_cached
+            cached = get_cached(s["path"])
+            if cached:
+                audios = cached
+            else:
+                audios = ai_tags_from_audio(
+                    s["path"],
+                    threshold=cfg.audio_threshold,
+                    log=logger,
+                )
+                set_cached(s["path"], audios)
+            for cn_key, score in audios:
+                # cn_key 形如 "AI_🎹_钢琴"，ai_tags 的键同为 f"AI_{tag}"
+                if cn_key in s["ai_tags"]:
+                    s["ai_tags"][cn_key]["score"] += score * cfg.weight_audio
 
         # if USE_ERA:
         #     # ✅ 年代
@@ -288,8 +316,9 @@ def save_era(songs, path):
     era_best = defaultdict(list)
     
     for s in songs:
-        y = s['year'][:3]
-        if y == "0" or y == "":
+        y = (s.get('year') or '')[:3]
+        # ✅ 空/0 年份都跳过，避免生成 0_ERA_📅_0s 空歌单
+        if y in ("0", ""):
             continue
         era_best[y].append(s)
         
@@ -300,7 +329,7 @@ def save_era(songs, path):
         file_dir = f"{path}/0_ERA_📅_{y}0s"
         os.makedirs(file_dir, exist_ok=True)
         file_path = f"{file_dir}/0_ERA_📅_{y}0s.m3u"
-        shutil.copy(resource_path("assets/cover.jpeg"), file_dir)
+        shutil.copy(resource_path("assets/covers/cover.jpeg"), file_dir)
         logger.info("  ->生成:"+file_path)
 
         with open(file_path, "w", encoding="utf-8") as f:
@@ -335,7 +364,7 @@ def save_artist(songs, path):
         file_dir = f"{path}/0_{at}_🎤_精选"
         os.makedirs(file_dir, exist_ok=True)
         file_path = f"{file_dir}/0_{at}_🎤_精选.m3u"
-        shutil.copy(resource_path("assets/cover.jpeg"), file_dir)
+        shutil.copy(resource_path("assets/covers/cover.jpeg"), file_dir)
         logger.info("  ->生成:"+file_path)
 
         with open(file_path, "w", encoding="utf-8") as f:
@@ -360,13 +389,19 @@ def save_plylist(songs, tag_name, path, type):
     os.makedirs(file_dir, exist_ok=True)
     
     file_path = f"{file_dir}/0_{tag_name}.m3u"
-    pic_name = tag_name.split('_')
-    pic_patch = resource_path(f"assets/{pic_name[1]} {pic_name[2]}.png")
-    
-    if os.path.exists(pic_patch):
-        shutil.copy(pic_patch, file_dir + "/cover.png")
+    # ✅ 标签名形如 NET_🎧_流行 / AI_🎹_钢琴：取 _ 后两段拼封面名；
+    #    若段数不符则退回默认封面，避免 IndexError
+    pic_parts = tag_name.split('_')
+    if len(pic_parts) >= 3:
+        pic_name = f"{pic_parts[1]} {pic_parts[2]}"
     else:
-        shutil.copy(resource_path("assets/cover.jpeg"), file_dir)
+        pic_name = ""
+    pic_patch = resource_path(f"assets/covers/{pic_name}.png") if pic_name else ""
+    
+    if pic_patch and os.path.exists(pic_patch):
+        shutil.copy(pic_patch, os.path.join(file_dir, "cover.png"))
+    else:
+        shutil.copy(resource_path("assets/covers/cover.jpeg"), file_dir)
 
     with open(file_path, "w", encoding="utf-8") as f:
 
@@ -392,37 +427,37 @@ def save_plylist(songs, tag_name, path, type):
 
     logger.info("  ->生成:"+file_path)
 
-def save(songs):
+def save(songs, cfg: Config):
     logger.info("生成歌单中...")
 
     # 存储缓存
     TitleSLCache.save()
 
-    path = f"{MUSIC_DIR}/AI分类歌单"
+    path = f"{cfg.music_dir}/AI分类歌单"
     # 保存 NET 标签歌单
-    if USE_NET:
+    if cfg.use_net:
         logger.info("  生成 NET 标签歌单中...")
         for value in TAG_DEFINITIONS.values():
             for tag in value.keys():
                 tag_name = f"NET_{tag}"
                 for song in songs:
-                    song["rank"] += song["net_tags"][tag_name]["score"] * WEIGHT_NET
+                    song["rank"] += song["net_tags"][tag_name]["score"] * cfg.weight_net
                 save_plylist(songs, tag_name, path, "net_tags")
 
     # 保存 AI 标签歌单
-    if USE_AI:
+    if cfg.use_ai:
         logger.info("  生成 AI 标签歌单中...")
         for tag in AI_LYRICS_DEFINITIONS.keys():
             tag_name = f"AI_{tag}"
             for song in songs:
-                song["rank"] += song["ai_tags"][tag_name]["score"] * WEIGHT_AI
+                song["rank"] += song["ai_tags"][tag_name]["score"] * cfg.weight_ai
             save_plylist(songs, tag_name, path, "ai_tags")
-    
-    if USE_ERA:
+
+    if cfg.use_era:
         logger.info("  生成 年代精选歌单中...")
         save_era(songs, path)
-    
-    if USE_ARTIST:
+
+    if cfg.use_artist:
         logger.info("  生成 歌手精选歌单中...")
         save_artist(songs, path)
 
@@ -432,7 +467,7 @@ def save(songs):
     # file_dir = f"{path}/DailyMix"
     # os.makedirs(file_dir, exist_ok=True)
     # file_path = f"{file_dir}/DailyMix.m3u"
-    # shutil.copy(resource_path("assets/cover.jpeg"), file_dir)
+    # shutil.copy(resource_path("assets/covers/cover.jpeg"), file_dir)
 
     # with open(file_path, "w", encoding="utf-8") as f:
     #     f.write("#EXTM3U\n")
@@ -456,44 +491,76 @@ def run_classifier(
     use_net=True,
     use_artist=True,
     use_era=True,
+    use_audio=False,
     ai_threshold=0.4,
+    audio_threshold=0.3,
     weight_ai=0,
+    weight_audio=1,
     weight_net=1,
     net_limit=10,
     log=None   # ✅ 接收GUI日志函数
 ):
-    global MUSIC_DIR
-    global USE_AI
-    global USE_NET
-    global USE_ARTIST
-    global USE_ERA
-    global AI_THRESHOLD
-    global WEIGHT_AI
-    global WEIGHT_NET
-    global NET_LIMIT
-
-    MUSIC_DIR = music_dir
-    USE_AI = use_ai
-    USE_NET = use_net
-    USE_ARTIST = use_artist
-    USE_ERA = use_era
-    AI_THRESHOLD = ai_threshold
-    WEIGHT_AI = weight_ai
-    WEIGHT_NET = weight_net
-    NET_LIMIT = net_limit
+    # ✅ 收敛为单一 Config，不再写 9 个 global
+    cfg = Config(
+        music_dir=music_dir,
+        use_ai=use_ai,
+        use_net=use_net,
+        use_artist=use_artist,
+        use_era=use_era,
+        use_audio=use_audio,
+        ai_threshold=ai_threshold,
+        audio_threshold=audio_threshold,
+        weight_ai=weight_ai,
+        weight_audio=weight_audio,
+        weight_net=weight_net,
+        net_limit=net_limit,
+    )
 
     if log:
         set_logger(log)
 
     logger.info("读取本地歌曲\n")
-    songs = load_music(MUSIC_DIR, log=logger)
+    songs = load_music(cfg.music_dir, log=logger)
     logger.info(f"本地歌曲:{len(songs)}\n")
 
-    songs = classify(songs)
-    save(songs)
+    songs = classify(songs, cfg)
+    save(songs, cfg)
 
     SonglistCache.save()
+    if cfg.use_audio:
+        from cores.audio_classify import save_cache as save_audio_cache
+        save_audio_cache()
     logger.info("分类完成")
 
 if __name__ == "__main__":
-    run_classifier(MUSIC_DIR)
+    import argparse
+
+    p = argparse.ArgumentParser(description="本地分类核心（GUI/CLI 双模式）")
+    p.add_argument("music_dir", help="音乐目录")
+    p.add_argument("--no-ai", action="store_true", help="禁用 AI 标签")
+    p.add_argument("--no-net", action="store_true", help="禁用 NET 标签")
+    p.add_argument("--no-artist", action="store_true", help="禁用歌手精选")
+    p.add_argument("--no-era", action="store_true", help="禁用年代")
+    p.add_argument("--ai-threshold", type=float, default=0.4)
+    p.add_argument("--audio", action="store_true", help="启用音频（PANNs）分类")
+    p.add_argument("--audio-threshold", type=float, default=0.3)
+    p.add_argument("--weight-ai", type=int, default=0)
+    p.add_argument("--weight-audio", type=int, default=1)
+    p.add_argument("--weight-net", type=int, default=1)
+    p.add_argument("--net-limit", type=float, default=10)
+    ns = p.parse_args()
+
+    run_classifier(
+        music_dir=ns.music_dir,
+        use_ai=not ns.no_ai,
+        use_net=not ns.no_net,
+        use_artist=not ns.no_artist,
+        use_era=not ns.no_era,
+        use_audio=ns.audio,
+        ai_threshold=ns.ai_threshold,
+        audio_threshold=ns.audio_threshold,
+        weight_ai=ns.weight_ai,
+        weight_audio=ns.weight_audio,
+        weight_net=ns.weight_net,
+        net_limit=ns.net_limit,
+    )

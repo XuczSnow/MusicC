@@ -2,9 +2,9 @@ import os
 import re
 import regex
 
-from script.music_tag import *
-from script.dirty_data import *
-from script.logger import AppLogger
+from script.music.music_tag import *
+from script.music.dirty_data import *
+from script.common.logger import AppLogger
 
 from pathlib import Path
 from mutagen.easyid3 import EasyID3
@@ -13,8 +13,15 @@ from mutagen.mp3 import MP3
 
 from pathlib import Path
 
-songs = []
-global_path = ""
+# ✅ E收敛：去重缓存改为可注入的单例容器，避免模块级可变全局
+#    仍保留模块级 songs 作为默认实例（向后兼容现有调用方）
+class _SongStore:
+    def __init__(self):
+        self.items = []
+        self.path = None
+
+_store = _SongStore()
+songs = []          # 兼容别名：默认使用 _store.items
 logger = AppLogger()
 
 
@@ -276,22 +283,27 @@ def get_song_info(path:str, type:str):
         "overwrite": overwrite
     }
 
-def load_music(folder, log = None, reload = False):
-    global songs, global_path, logger
+def load_music(folder, log = None, reload = False, store=None):
+    # ✅ E收敛：去重缓存通过可注入的 store（默认 _store）管理
+    global logger
+    st = store if store is not None else _store
 
     logger = log if log else logger
-    path = resource_path(folder)
-    if songs == [] or global_path != path or reload:
-        songs = []
+    # ✅ B2修复：folder 是用户选择的绝对目录，不能走 resource_path
+    # （resource_path 仅在非 PyInstaller 下会拼上 abspath(".") 前缀，
+    #  且 PyInstaller 下会错误拼到 _MEIPASS 临时目录）
+    path = folder if os.path.isabs(folder) else os.path.abspath(folder)
+    if st.items == [] or st.path != path or reload:
+        st.items = []
     else:
-        return songs
+        return st.items
 
-    global_path = path
+    st.path = path
 
     unique = {}
     song_idx = 0
 
-    for root, _, files in os.walk(global_path):
+    for root, _, files in os.walk(st.path):
 
         for f in files:
 
@@ -314,21 +326,21 @@ def load_music(folder, log = None, reload = False):
 
                 if key in unique:
                     logger.warning(f"歌曲重复：{song['artist']} - {song['title']}")
-                    print(f"已存在：{songs[unique[key]]}")
-                    print(f"新歌曲：{song}")
-                    if path.lower().endswith(".flac") and songs[unique[key]]['path'].lower().endswith(".mp3"):
+                    logger.info(f"已存在：{st.items[unique[key]]['path']}")
+                    logger.info(f"新歌曲：{path}")
+                    if path.lower().endswith(".flac") and st.items[unique[key]]['path'].lower().endswith(".mp3"):
                         logger.info("优先选取flac文件")
-                        songs[unique[key]] = song
-                    elif os.path.getsize(path) > os.path.getsize(songs[unique[key]]['path']):
+                        st.items[unique[key]] = song
+                    elif os.path.getsize(path) > os.path.getsize(st.items[unique[key]]['path']):
                         logger.info("优先选取文件较大的歌曲")
-                        songs[unique[key]] = song
+                        st.items[unique[key]] = song
                     continue
                 
                 unique[key] = song_idx
-                songs.append(song)
+                st.items.append(song)
                 song_idx += 1
 
-    return songs
+    return st.items
 
 if __name__ == "__main__":
     load_music("../Music")

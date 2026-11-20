@@ -8,6 +8,18 @@ pypinyin
 
 # ===== AI模型 =====
 sentence-transformers
+# 歌词对齐/增补（惰性加载，仅勾选 AI 同步/增补时才用；GPU 需另配驱动）
+faster-whisper
+# faster-whisper 音频解码依赖：锁定 18.x（>=14 的 av.open 签名变更会导致
+# "open() got an unexpected keyword argument 'metadata_errors'" 崩溃；
+# 12/13 在 Python 3.14 无预编译轮子，18.x 有 cp314 轮且兼容）
+av==18.1.0
+# 音频（PANNs）分类（惰性加载，仅勾选"音频分类"才用；GPU 需 PyTorch CUDA）
+# PANNs 权重放 models/panns_Cnn14/（HF: nicofarr/panns_Cnn14）。官方架构来自
+# qiuqiangkong/audioset_tagging_cnn，需 torchlibrosa（Spectrogram/LogmelFilterBank）。
+# 未放置权重时自动回退 librosa 声学启发式（无需额外安装即可跑通）。
+librosa
+torchlibrosa
 
 # ===== 数学计算 =====
 scikit-learn

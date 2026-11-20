@@ -4,8 +4,9 @@ from pathlib import Path
 import requests
 import musicbrainzngs
 
-from script.logger import AppLogger
-from script.load_music import *
+from script.common.logger import AppLogger
+from script.music.load_music import *
+from script.common.rate_limiter import lyric_limiter
 
 # MusicBrainz要求设置UA
 musicbrainzngs.set_useragent("MusicClassifier", "1.0.2")
@@ -112,12 +113,14 @@ class MusicFetcher:
 
     def build_song(self, title, artist):
 
-        print(f"Searching: {artist} - {title}")
+        self.logger.info(f"MusicBrainz 搜索: {artist} - {title}")
 
         release_id = None
         lyrics_data = None
         cover_url = None
 
+        # ✅ 外部API（MusicBrainz）节流
+        lyric_limiter.wait()
         recording = self.search_song(title, artist)
 
         if not recording:
@@ -125,6 +128,9 @@ class MusicFetcher:
 
         release_id = self.get_release_id(recording)
         cover_url = self.get_cover_url(release_id)
+
+        # ✅ 外部API（Lrclib）节流
+        lyric_limiter.wait()
         lyrics_data = self.get_lyrics(title, artist)
 
         # print(recording.get("artist-credit-phrase"))

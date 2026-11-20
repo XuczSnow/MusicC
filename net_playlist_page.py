@@ -1,357 +1,78 @@
-# net_playlist_page.py
-# ✅ 多平台歌单页面 + 本地匹配
+# net_playlist_page.py — 平台歌单页面（GUI 壳 + CLI 入口）
+# 核心逻辑由 net_playlist_core 提供；本文件仅负责 UI 与入口分发。
+# 双模式：带命令行参数 → CLI；无参数（或 --gui）→ GUI。
+import sys
+import threading
 
 import customtkinter as ctk
-import requests
-import random
-import time
 
-from tkinter import filedialog
-
-from script.music_tag import *
-from script.load_music import *
-from script.logger import AppLogger
-from script.cache_manager import JsonCache
+from script.music.music_tag import TAG_DEFINITIONS, MUSIC_PLATFARM
+from script.common.logger import AppLogger
+from script.ui.widget_factory import (
+    folder_picker_row,
+    page_shell,
+    log_box,
+    status_label,
+    action_button,
+)
 
 logger = None
 
-# ================= 工具 =================
-def normalize(text):
-    return text.replace(" ", "").lower()
 
+def create_net_page(parent, logger=None):
+    main_frame = page_shell(parent)
+    page_logger = logger if logger is not None else AppLogger()
 
-def build_local_index(songs):
-    index = {}
-    for s in songs:
-        key = normalize(s["title"] + split_artists(s["artist"])[0])
-        index[key] = s
-    return index
+    # 路径选择
+    path_entry = folder_picker_row(main_frame, placeholder="选择音乐目录...")
 
-
-def match_local(online, index):
-    result = []
-    for s in online:
-        key = normalize(s["title"] + split_artists(s["artist"])[0])
-        if key in index:
-            result.append(index[key])
-    return result
-
-def save_playlist_cover(
-        playlist_name,
-        cover_url,
-        save_dir="playlists/covers"):
-
-    if not cover_url:
-        return None
-
-    os.makedirs(
-        save_dir,
-        exist_ok=True
-    )
-
-    try:
-
-        r = requests.get(
-            cover_url,
-            timeout=15
-        )
-
-        if r.status_code != 200:
-            return None
-
-        filename = (
-            sanitize_filename(playlist_name)
-            + ".jpg"
-        )
-
-        filepath = os.path.join(
-            save_dir,
-            filename
-        )
-
-        with open(filepath, "wb") as f:
-            f.write(r.content)
-
-        return filepath
-
-    except Exception as e:
-        logger.exception(e)
-        return None
-
-KeySLCache = JsonCache("cahce/songlist_cache_key.json")
-SonglistCache = JsonCache("cahce/songlist_cache.json")
-search_cnt = 0
-
-# ================= 平台实现 =================
-def get_netease_multi(keyword, list_limit=30, platform="all"):
-    global search_cnt
-
-    BASE = "http://localhost:8080/api/v1"
-
-    result = []
-
-    time.sleep(0.5)
-    # ===== 1️⃣ 搜索歌单 =====
-    try:
-        data = KeySLCache.get(keyword)
-        if not data:
-            search_cnt += 1
-            r = requests.get(
-                f"{BASE}/music/search",
-                params={
-                    "q": keyword,
-                    "type": "playlist"
-                }
-            )
-            data = r.json().get("data",[])
-            KeySLCache.set(keyword, data)
-        playlists = data.get("playlists", [])
-
-    except Exception as e:
-        logger.exception(e)
-        return []
-
-    # ===== 2️⃣ 遍历歌单 =====
-    list_count = 0
-    playlists = sorted(playlists, key=lambda x: x["play_count"], reverse=True)
-    for p in playlists:
-        pid = p["id"]
-        pname = p["name"]
-        source = p["source"]
-        cover = p["cover"] 
-        play_cnt = p.get("play_count", 0)
-        track_cnt = p.get("track_count", 0)
-
-        if source != platform and platform != "all":
-            continue
-
-        if list_count == list_limit:
-            break
-
-        if is_dirty_playlist(pname, play_cnt, track_cnt):
-            continue
-        elif play_cnt == 0:
-            if random.random() > 0.5:
-                continue
-        else:
-            list_count += 1
-            logger.info(f"    读取歌单: {pname}")
-
-        try:
-            songs_raw = SonglistCache.get(f"{pname}_{pid}")
-            if not songs_raw:
-                search_cnt += 1
-                r2 = requests.get(
-                    f"{BASE}/playlist/detail",
-                    params={
-                        "id": pid,
-                        "source": source
-                    }
-                )
-
-                detail = r2.json()
-                songs_raw = detail.get("data", [])
-                SonglistCache.set(f"{pname}_{pid}", songs_raw)
-
-            songs = [
-                {
-                    "title": s.get("name", ""),
-                    "artist": s.get("artist", ""),
-                    "album": s.get("album", "")
-                }
-                for s in songs_raw
-            ]
-
-
-            logger.info(f"    获取: {len(songs)} 首\n")
-
-            result.append({
-                "name": pname,
-                "source": source,
-                "cover": cover,
-                "songs": songs
-            })
-
-        except Exception as e:
-            logger.exception(e)
-    
-    if search_cnt%100 == 0 and search_cnt != 0:
-        logger.info(f"    已网络处理 {search_cnt} 个网络请求，请等待10秒~\n")
-        time.sleep(10)
-
-    return result
-
-# ================= 保存为 m3u =================
-
-def save_playlist(name, songs, cover_url = ''):
-
-    import os
-
-    path = f"{MUSIC_DIR}/AI分类歌单"
-    path = Path(path).as_posix()
-    os.makedirs(path, exist_ok=True)
-
-    name = sanitize_filename(name)
-
-    file_path = f"{path}/{name}/{name}.m3u"
-    if cover_url != '':
-        save_playlist_cover(name, cover_url, f"{path}/{name}")
-    logger.info(f"    ->生成:{file_path}")
-
-    with open(file_path, "w", encoding="utf-8") as f:
-
-        f.write("#EXTM3U\n")
-        f.write(f"#PLAYLIST:{name}\n")
-
-        for s in songs:
-
-            title = s.get("title", "未知")
-            artist = s.get("artist", "未知")
-            album = s.get("album", "未知专辑")
-            duration = s.get("duration", -1)
-
-            f.write(f"#EXTALB:{album}\n")
-            f.write(f"#EXTART:{artist}\n")
-            f.write(f"#EXTINF:{duration},{artist} - {title}\n")
-            f.write(s["path"] + "\n")
-
-def generate_netease_multi(keyword, songs, limit, platform = "all", min_limit=2):
-
-    playlists = get_netease_multi(keyword, list_limit=limit, platform=platform)
-
-    index = build_local_index(songs)
-
-    for p in playlists:
-
-        pname = p["name"]
-        source = p["source"]
-
-        logger.info(f"    处理歌单: {pname}")
-
-        matched = match_local(p["songs"], index)
-
-        if len(matched) < min_limit:
-            if len(matched) == 0:
-                logger.warning("    没有匹配到歌曲, 跳过\n")
-            else:
-                logger.warning(f"    只匹配到({len(matched)})首歌曲，跳过\n")
-            continue
-
-        # safe_name = pname.replace("/", "_")
-
-        from pypinyin import lazy_pinyin, Style
-        
-        first = lazy_pinyin(pname, style=Style.FIRST_LETTER)
-        for i in first:
-            if i.isalpha():
-                break
-
-        save_playlist(f"{i.upper()}_{pname}_{source}", matched, p["cover"])
-
-        logger.info(f"    匹配: {len(matched)} / {len(p['songs'])}\n")
-
-# ================= 页面组件 =================
-
-def create_net_page(parent):
-    global logger
-
-    # ===== 根 =====
-    main_frame = ctk.CTkFrame(parent)
-    main_frame.pack(fill="both", expand=True)
-
-    # ================= 路径选择 =================
-    frame_path = ctk.CTkFrame(main_frame)
-    frame_path.pack(pady=10, padx=20, fill="x")
-
-    path_entry = ctk.CTkEntry(frame_path, placeholder_text="选择音乐目录...")
-    path_entry.pack(side="left", fill="x", expand=True, padx=10, pady=10)
-
-    def select_folder():
-        folder = filedialog.askdirectory()
-        if folder:
-            path_entry.delete(0, "end")
-            path_entry.insert(0, folder)
-
-    btn_folder = ctk.CTkButton(
-        frame_path,
-        text="浏览",
-        width=80,
-        command=select_folder
-    )
-    btn_folder.pack(side="right", padx=10)
-
-    # ================= 参数区域 =================
-    # ----- 平台选择 -----
-    platform_ctrl = ctk.CTkFrame(main_frame)
-    platform_ctrl.pack(pady=10, padx=20, fill="x")
+    # 平台选择（前缀文字 + 下拉框）
+    platform_ctrl = ctk.CTkFrame(main_frame, fg_color="transparent")
+    platform_ctrl.pack(pady=5, padx=20, fill="x")
     platform_var = ctk.StringVar(value="all")
-
+    ctk.CTkLabel(platform_ctrl, text="平台").pack(side="left", padx=(0, 8))
     platform_menu = ctk.CTkOptionMenu(
-        platform_ctrl,
-        values=MUSIC_PLATFARM,
-        variable=platform_var
+        platform_ctrl, values=MUSIC_PLATFARM, variable=platform_var
     )
     platform_menu.pack(side="left", fill="x", expand=True)
 
-    # ----- 数量 -----
-    frame_net = ctk.CTkFrame(main_frame)
-    frame_net.pack(pady=10, padx=20, fill="x")
-
+    # 数量
+    frame_net = ctk.CTkFrame(main_frame, fg_color="transparent")
+    frame_net.pack(pady=5, padx=20, fill="x")
     ctk.CTkLabel(frame_net, text="网络搜索数量").pack(side="left")
-    
     entry_limit = ctk.CTkEntry(frame_net)
     entry_limit.insert(0, "30")
     entry_limit.pack(side="right")
 
-    # ----- 最小数量 -----
-    frame_min = ctk.CTkFrame(main_frame)
-    frame_min.pack(pady=10, padx=20, fill="x")
-
+    # 最小数量
+    frame_min = ctk.CTkFrame(main_frame, fg_color="transparent")
+    frame_min.pack(pady=5, padx=20, fill="x")
     ctk.CTkLabel(frame_min, text="歌单最小数量").pack(side="left")
-    
     min_limit = ctk.CTkEntry(frame_min)
     min_limit.insert(0, "2")
     min_limit.pack(side="right")
 
-    # ----- 模式选择 -----
-    mode_ctrl = ctk.CTkFrame(main_frame)
-    mode_ctrl.pack(pady=10, padx=20, fill="x")
+    # 模式选择
+    mode_ctrl = ctk.CTkFrame(main_frame, fg_color="transparent")
+    mode_ctrl.pack(pady=5, padx=20, fill="x")
     mode_var = ctk.StringVar(value="preset")
 
-    radio_frame = ctk.CTkFrame(mode_ctrl)
-    radio_frame.pack(pady=10)
+    radio_frame = ctk.CTkFrame(mode_ctrl, fg_color="transparent")
+    radio_frame.pack(pady=5)
 
-    ctk.CTkRadioButton(
-        radio_frame,
-        text="模板模式",
-        variable=mode_var,
-        value="preset",
-        command=lambda: update_mode()
-    ).pack(side="left", padx=10)
+    ctk.CTkRadioButton(radio_frame, text="模板模式", variable=mode_var, value="preset",
+                       command=lambda: update_mode()).pack(side="left", padx=10)
+    ctk.CTkRadioButton(radio_frame, text="自定义关键词", variable=mode_var, value="custom",
+                       command=lambda: update_mode()).pack(side="left", padx=10)
+    ctk.CTkRadioButton(radio_frame, text="随机本地歌曲", variable=mode_var, value="local",
+                       command=lambda: update_mode()).pack(side="left", padx=10)
 
-    ctk.CTkRadioButton(
-        radio_frame,
-        text="自定义关键词",
-        variable=mode_var,
-        value="custom",
-        command=lambda: update_mode()
-    ).pack(side="left", padx=10)
-
-    ctk.CTkRadioButton(
-        radio_frame,
-        text="随机本地歌曲",
-        variable=mode_var,
-        value="local",
-        command=lambda: update_mode()
-    ).pack(side="left", padx=10)
-
-    # ----- 字典选择 -----
-    control_container = ctk.CTkFrame(mode_ctrl)
+    # 字典选择 / 输入
+    control_container = ctk.CTkFrame(mode_ctrl, fg_color="transparent")
     control_container.pack(fill="x", pady=5, expand=True)
 
-    preset_frame = ctk.CTkFrame(control_container)
+    preset_frame = ctk.CTkFrame(control_container, fg_color="transparent")
     preset_frame.pack(fill="x", expand=True)
-
     group_var = ctk.StringVar(value=list(TAG_DEFINITIONS.keys())[0])
     tag_var = ctk.StringVar()
 
@@ -359,47 +80,29 @@ def create_net_page(parent):
         preset_frame,
         values=list(TAG_DEFINITIONS.keys()),
         variable=group_var,
-        command=lambda _: update_tags()
+        command=lambda _: update_tags(),
     )
     group_menu.pack(side="left", padx=5, fill="x", expand=True)
-
-    tag_menu = ctk.CTkOptionMenu(
-        preset_frame,
-        values=[],
-        variable=tag_var
-    )
+    tag_menu = ctk.CTkOptionMenu(preset_frame, values=[], variable=tag_var)
     tag_menu.pack(side="left", padx=5, fill="x", expand=True)
 
     def update_tags():
-
         group = group_var.get()
-        tags = list(TAG_DEFINITIONS[group].keys())
-
-        # ✅ 加入 ALL
-        tags = ["ALL"] + tags
-
+        tags = ["ALL"] + list(TAG_DEFINITIONS[group].keys())
         tag_menu.configure(values=tags)
-
         if tags:
             tag_var.set(tags[0])
-    
-    # ----- 输入选择 -----
-    custom_frame = ctk.CTkFrame(control_container)
-    custom_frame.pack(fill="x", pady=5, expand=True)
 
-    entry_keyword = ctk.CTkEntry(
-        custom_frame,
-        placeholder_text="输入关键词（例如：失恋歌 / 周杰伦）"
-    )
+    custom_frame = ctk.CTkFrame(control_container, fg_color="transparent")
+    custom_frame.pack(fill="x", pady=5, expand=True)
+    entry_keyword = ctk.CTkEntry(custom_frame, placeholder_text="输入关键词（例如：失恋歌 / 周杰伦）")
     entry_keyword.pack(fill="x", padx=5)
 
-    # ----- 本地歌曲 -----
-    local_frame = ctk.CTkFrame(control_container)
+    local_frame = ctk.CTkFrame(control_container, fg_color="transparent")
     local_frame.pack(fill="x", pady=5, expand=True)
     ctk.CTkLabel(local_frame, text="随机选择本地歌曲搜索歌单").pack(padx=5)
 
     def update_mode():
-
         if mode_var.get() == "preset":
             preset_frame.pack(fill="x", expand=True)
             local_frame.pack_forget()
@@ -416,174 +119,103 @@ def create_net_page(parent):
     update_mode()
     update_tags()
 
-    # ================= 日志区域 =================
-    log_frame = ctk.CTkFrame(main_frame)
-    log_frame.pack(padx=20, pady=10, fill="both", expand=True)
+    # 状态 + 日志
+    status = status_label(main_frame, "状态：等待开始")
+    log_widget = log_box(main_frame)
+    page_logger = AppLogger(textbox=log_widget)
+    globals()['logger'] = page_logger
 
-    log_box = ctk.CTkTextbox(log_frame, height=200)
-    log_box.pack(fill="both", expand=True, padx=10, pady=10)
-    logger = AppLogger(textbox=log_box)
-
-    # ===== 下：按钮区（固定🔥）=====
-    bottom_frame = ctk.CTkFrame(main_frame)
-    bottom_frame.pack(pady=10, padx=20, fill="x")
-
-    # ----- 按钮 -----
     def run():
-
-        global MUSIC_DIR
-
-        MUSIC_DIR = path_entry.get()
-
-        if not MUSIC_DIR:
+        music_dir = path_entry.get()
+        if not music_dir:
             logger.warning("请先选择目录\n")
             return
-    
-        import threading
+        if btn.cget("state") == "disabled":
+            return
 
         def task():
-            btn.configure(state="disabled")
+            from cores.net_playlist_core import run_playlist
 
-            songs = load_music(MUSIC_DIR, log=logger)
-            
-            limit = int(entry_limit.get())
-            min_hj = int(min_limit.get())
+            run_playlist(
+                music_dir=music_dir,
+                mode=mode_var.get(),
+                group=group_var.get(),
+                tag=tag_var.get(),
+                keyword=entry_keyword.get().strip(),
+                limit=int(entry_limit.get()),
+                min_limit=int(min_limit.get()),
+                platform=platform_var.get(),
+                log=page_logger,
+            )
 
-            platform = platform_var.get()
+        # ⚠️ 子线程不直接改 Tk（after 也非线程安全）。
+        # 用 threading.Event 通知主线程 after 回调，再更新按钮状态。
+        _done = threading.Event()
 
-            # ================= 模板模式 =================
-            if mode_var.get() == "preset":
+        def _worker():
+            task()
+            _done.set()
 
-                group = group_var.get()
-                tag = tag_var.get()
+        threading.Thread(target=_worker, daemon=True).start()
+        main_frame.after(0, lambda: btn.configure(state="disabled"))
 
-                if tag == "ALL":
-
-                    logger.info(f"批量生成: {group}")
-
-                    for t, keywords in TAG_DEFINITIONS[group].items():
-
-                        logger.info(f"  {t}")
-
-                        generate_netease_multi(
-                            keyword=" ".join(keywords),
-                            songs=songs,
-                            limit=limit,
-                            min_limit = min_hj,
-                            platform = platform
-                        )
-
-                else:
-
-                    keywords = TAG_DEFINITIONS[group][tag]
-
-                    logger.info(f"{group} - {tag}")
-
-                    generate_netease_multi(
-                        keyword=" ".join(keywords),
-                        songs=songs,
-                        limit=limit,
-                        min_limit = min_hj,
-                        platform = platform
-                    )
-            # ================= 随机歌曲 =================
-            elif mode_var.get() == "local":
-                page = int((limit-1)/5)+1
-                num_song = len(songs)
-                label_en = [0]*num_song
-                loop_count = (page if num_song > page else num_song)
-
-                i = 0
-                while i < loop_count:
-                    idx = random.randint(0, num_song-1)
-                    if label_en[idx] != 1:
-                        label_en[idx] = 1
-                        i=i+1 #避免重复
-                    else:
-                        continue
-                    title = songs[idx]["title"]
-                    artist = songs[idx]["artist"]
-                    keywords = title + " " + artist
-                    logger.info(f"随机选择歌曲: {title} - {artist}\n")
-
-                    generate_netease_multi(
-                        keyword=keywords,
-                        songs=songs,
-                        limit=5,
-                        min_limit = min_hj,
-                        platform = platform
-                    )
-
-            # ================= 自定义关键词 =================
+        def _poll():
+            if _done.is_set():
+                btn.configure(state="enabled")
             else:
+                main_frame.after(200, _poll)
 
-                keyword = entry_keyword.get().strip()
+        main_frame.after(200, _poll)
 
-                if not keyword:
-                    logger.warning("请输入关键词\n")
-                    return
-
-                logger.info(f"自定义搜索: {keyword}")
-
-                generate_netease_multi(
-                    keyword=keyword,
-                    songs=songs,
-                    limit=limit,
-                    min_limit = min_hj,
-                    platform = platform,
-                )
-                
-            KeySLCache.save()
-            SonglistCache.save()
-            logger.info("生成完成\n")
-            btn.configure(state="enabled")
-
-        threading.Thread(target=task).start()
-
-    btn = ctk.CTkButton(bottom_frame,
-                        text="▶ 生成歌单",
-                        height=40,
-                        command=run)
-    btn.pack(pady=10)
-
+    btn = action_button(main_frame, "▶ 生成歌单", run)
     return main_frame
 
+
+# ---------------- 双模式入口 ----------------
+def _cli(args):
+    import argparse
+
+    p = argparse.ArgumentParser(description="平台歌单（核心 CLI）")
+    p.add_argument("music_dir", help="音乐目录")
+    p.add_argument("--mode", default="custom", choices=["preset", "local", "custom"])
+    p.add_argument("--group", default=None)
+    p.add_argument("--tag", default=None)
+    p.add_argument("--keyword", default=None)
+    p.add_argument("--limit", type=int, default=30)
+    p.add_argument("--min", type=int, default=2, dest="min_limit")
+    p.add_argument("--platform", default="all", choices=MUSIC_PLATFARM)
+    p.add_argument("--gui", action="store_true", help="忽略参数，启动 GUI")
+    ns = p.parse_args(args)
+
+    if ns.gui:
+        _gui()
+        return
+
+    from cores.net_playlist_core import run_playlist
+    run_playlist(
+        music_dir=ns.music_dir,
+        mode=ns.mode,
+        group=ns.group,
+        tag=ns.tag,
+        keyword=ns.keyword,
+        limit=ns.limit,
+        min_limit=ns.min_limit,
+        platform=ns.platform,
+    )
+
+
+def _gui():
+    from _bootstrap import bootstrap_page
+    bootstrap_page(
+        page_title="🎧 Net Playlist Page",
+        create_fn=create_net_page,
+        page_logger=logger,
+        start_api=True,
+    )
+
+
 if __name__ == "__main__":
-    # ✅ 全局主题
-    ctk.set_appearance_mode("dark")
-    ctk.set_default_color_theme("green")
-
-    # ================= 窗口 =================
-    app = ctk.CTk()
-    app.title("AI Music Classifier")
-    app.geometry("600x800")
-
-    # ================= 标题 =================
-    title = ctk.CTkLabel(
-        app,
-        text="🎧 Net Playlist Page",
-        font=ctk.CTkFont(size=20, weight="bold")
-    )
-    title.pack(pady=10)
-    
-    net_frame = create_net_page(app)
-    net_frame.pack(fill="both", expand=True)
-
-    from script.start_service import *
-    import threading
-
-    bottom_label = ctk.CTkLabel(
-    app,
-    text="初始化中..."
-    )
-
-    bottom_label.pack(side="right")
-
-    threading.Thread(
-        target=lambda: start_go_music_api(logger, bottom_label),
-        daemon=True
-    ).start()
-
-    app.mainloop()
-
-
+    if len(sys.argv) > 1:
+        _cli(sys.argv[1:])
+    else:
+        _gui()

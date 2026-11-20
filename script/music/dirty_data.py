@@ -1,4 +1,4 @@
-from script.logger import AppLogger
+from script.common.logger import AppLogger
 
 logger = AppLogger()
 
@@ -378,12 +378,26 @@ def is_dirty_artist(artist):
     return artist in DIRTY_METADATA_RULES["bad_artist"]
 
 def is_dirty_lyric(lyric):
-    if len(lyric) < 100:
+    """判断歌词是否为"脏数据"。
+
+    脏 = 明确无效（"暂无歌词/纯音乐"等）或乱码。
+    ⚠️ 没有时间戳的纯文本歌词是**有效**的，不算脏。
+    """
+    if not lyric:
+        return False  # 空歌词是"缺失"，不是"脏"，由上层 overwrite 决定是否补全
+    text = lyric.strip()
+    # 过短且没有 LRC 时间戳 → 大概率是无效占位
+    has_lrc = bool(re.search(r'\[\d{1,2}:\d{2}(?:\.\d{1,3})?\]', text))
+    if len(text) < 10 and not has_lrc:
         return True
-    elif not re.search(r'\[\d{1,2}:\d{2}(?:\.\d{1,3})?\]',lyric):
+    # 命中明确无效歌词短语
+    for w in BAD_LYRIC_RULES["invalid_lyric"]:
+        if w in text:
+            return True
+    # 含乱码/广告
+    if contains_garbled(text) or contains_ad_words(text):
         return True
-    else:
-        return False
+    return False
         
     
 def is_dirty_playlist(pname, play_cnt, track_cnt):

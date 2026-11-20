@@ -1,11 +1,27 @@
-#music
+# music
 *.flac
 *.mp3
 *.wav
 
+# Local AI models
+/models/*
+!/models/.gitkeep
+
 # pictures
 Designer.png
 icon.png
+
+# 临时测试 / 打包产物 / 运行期生成
+_fulltest.py
+_fulltest_log.txt
+_pack.py
+_music_bak/
+_Music_bak/
+*_test.py
+# 根目录临时截图目录（不含 docs/screenshots/ 的正式截图）
+/screenshots/
+/_dist/
+/MusicC_project.zip
 
 # innosetup
 # *.iss

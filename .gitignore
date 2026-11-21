@@ -20,6 +20,7 @@ _Music_bak/
 *_test.py
 # 根目录临时截图目录（不含 docs/screenshots/ 的正式截图）
 /screenshots/
+/website/
 /_dist/
 /MusicC_project.zip
 

@@ -1,5 +1,7 @@
 # AI歌单生成器（AI Music Classifier）
 
+> 项目介绍网页：[在线访问](https://home.xuczsnow.cc.cd/app/music_c/index.html)
+
 ## 项目简介
 
 > 一个集 **本地音乐管理、AI 智能分类、网络歌单生成、元数据补全、音乐库整理** 于一体的桌面音乐管理工具。

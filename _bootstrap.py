@@ -48,6 +48,13 @@ def bootstrap_page(
             daemon=True
         ).start()
 
+    # ✅ 窗口关闭时停掉本进程启动的 go-music-api，避免 exe 残留后台
+    def _on_close():
+        from script.services.start_service import stop_go_music_api
+        stop_go_music_api()
+        app.destroy()
+
+    app.protocol("WM_DELETE_WINDOW", _on_close)
     app.mainloop()
 
 

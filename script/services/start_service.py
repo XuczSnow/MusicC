@@ -16,14 +16,24 @@ _HEALTH_URL = "http://localhost:8080/api/v1/system/cookies"
 
 
 def _api_alive():
-    """返回 True 表示服务在运行（能连上即可，任意状态码都算存活）。"""
+    """返回 True 表示 go-music-api 在运行。
+
+    判定：2xx/3xx 且响应体是 JSON 或空。
+    407/500/502 等一律判死（McAfee 代理劫持 localhost 会返回 407 + HTML）。
+    """
     try:
-        requests.get(_HEALTH_URL, timeout=3)
-        return True  # 有响应（正常 200）即存活
+        r = requests.get(_HEALTH_URL, timeout=3)
+        if r.status_code >= 400:
+            return False
+        ct = (r.headers.get("Content-Type") or "").lower()
+        # HTML 响应体（代理网关/错误页）不算存活
+        if "text/html" in ct and r.text.strip():
+            return False
+        return True
     except requests.exceptions.ConnectionError:
         return False
     except Exception:
-        return True  # 其他异常（超时/DNS）不轻易判定死
+        return False
 
 
 def set_logger(func):
@@ -55,13 +65,13 @@ def start_go_music_api(log = None, label = None):
         creationflags=subprocess.CREATE_NO_WINDOW
     )
 
-    # ✅ 等待服务启动（能连上即成功，任意状态码都算）
+    # ✅ 等待服务启动：前密后疏（前 4 次 0.2s，后 6 次 0.5s，总 ~6.8s）
     for i in range(10):
         if _api_alive():
             _logger("go-music-api 启动成功\n")
             return "API运行中"
         _logger(f"等待启动({i+1}/10)...\n")
-        time.sleep(1)
+        time.sleep(0.2 if i < 4 else 0.5)
 
     _logger("启动失败")
     return "API未启动, 请重启软件"

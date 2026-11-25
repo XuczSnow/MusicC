@@ -169,13 +169,75 @@ def initialize():
 
     app.after(200, _poll_api)
 
-    # ✅ 性能：页面均为轻量 UI 壳（重库已惰性化），无需阶梯延迟，
-    #    一次性顺序加载，首屏更快可用
-    load_classify_page()
-    load_net_page()
-    load_mate_page()
-    load_ori_page()
-    load_aboout_page()
+    # ✅ 性能：5 个页面并行 import（后台线程池），主线程轮询结果逐个挂 UI。
+    #    避免串行 import 把重依赖（faster-whisper/torch 等）堆在首屏关键路径。
+    from concurrent.futures import ThreadPoolExecutor
+
+    def _load_parallel():
+        """后台线程：并行 import + 构建 5 个 page 的 frame（纯 CPU，不碰 Tk）。
+
+        返回 (frames, ready)：frames 是 (load_func_name, frame) 列表；
+        主线程拿到后逐个 pack 到对应 tab。
+        """
+        frames = []
+        with ThreadPoolExecutor(max_workers=5) as pool:
+            futures = [
+                pool.submit(_build_page_frame, "classify", main_tab, logger),
+                pool.submit(_build_page_frame, "net", net_tab, None),
+                pool.submit(_build_page_frame, "mate", meta_tab, None),
+                pool.submit(_build_page_frame, "ori", organize_tab, None),
+                pool.submit(_build_page_frame, "aboout", about_tab, None),
+            ]
+            for fut in futures:
+                try:
+                    name, frame = fut.result()
+                    frames.append((name, frame))
+                except Exception:
+                    pass  # 单页构建失败不阻塞其他页
+        return frames
+
+    def _build_page_frame(name, tab, lg):
+        if name == "classify":
+            from classify_page import create_classify_page
+            return name, create_classify_page(tab, logger=lg)
+        if name == "net":
+            from net_playlist_page import create_net_page
+            return name, create_net_page(tab)
+        if name == "mate":
+            from metadata_page import create_metadata_page
+            return name, create_metadata_page(tab)
+        if name == "ori":
+            from organize_page import create_organize_page
+            return name, create_organize_page(tab)
+        if name == "aboout":
+            from about_page import create_about_page
+            return name, create_about_page(tab)
+        return name, None
+
+    def _pack_frames(frames):
+        """主线程回调：把后台构建好的 frame 逐个 pack 到对应 tab。"""
+        name_to_tab = {"classify": main_tab, "net": net_tab, "mate": meta_tab,
+                       "ori": organize_tab, "aboout": about_tab}
+        for name, frame in frames:
+            if frame is None:
+                continue
+            tab = name_to_tab.get(name)
+            if tab is not None:
+                frame.pack(fill="both", expand=True)
+
+    def _poll_pages():
+        try:
+            frames = _pages_future.result(timeout=0.01)
+            _pack_frames(frames)
+        except Exception:
+            pass  # 未就绪或失败，下一轮再试
+        else:
+            return
+        app.after(30, _poll_pages)
+
+    # 启动后台线程并行构建
+    _pages_future = ThreadPoolExecutor(max_workers=1).submit(_load_parallel)
+    app.after(30, _poll_pages)
 
     # 启动检查更新（后台，不阻塞首屏；延迟 500ms 避开渲染高峰）
     app.after(500, _run_update_check)

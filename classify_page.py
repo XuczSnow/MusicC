@@ -66,20 +66,35 @@ def create_classify_page(parent, logger=None):
     ctk.CTkCheckBox(switch_row, text="歌手精选", variable=var_artist, width=86).pack(side="left", padx=(0, 8))
     ctk.CTkCheckBox(switch_row, text="年代", variable=var_era, width=54).pack(side="left", padx=(0, 0))
 
-    # AI阈值（标签 + 滑块 同一行，标签列与其它行对齐）
+    # 文本AI阈值（AI歌词语义分类，标签 + 滑块 同一行，标签列与其它行对齐）
     frame_slider = ctk.CTkFrame(frame_control, fg_color="transparent")
     frame_slider.pack(fill="x", padx=5, pady=5)
 
-    label_ai = ctk.CTkLabel(frame_slider, text="AI阈值 0.4", width=LABEL_W, anchor="w")
+    label_ai = ctk.CTkLabel(frame_slider, text="文本AI阈值 0.4", width=LABEL_W, anchor="w")
     label_ai.pack(side="left", padx=5)
 
     def ai_slider_changed(value):
-        label_ai.configure(text="AI阈值 " + format(value, '.2f'))
+        label_ai.configure(text="文本AI阈值 " + format(value, '.2f'))
 
     slider_ai = ctk.CTkSlider(frame_slider, from_=0.2, to=0.8, width=160)
     slider_ai.set(0.4)
     slider_ai.configure(command=ai_slider_changed)
     slider_ai.pack(side="left", padx=10, fill="x", expand=True)
+
+    # 音频AI阈值（PANNs 分类概率阈值，仅 AI音频 勾选时生效）
+    frame_audio_slider = ctk.CTkFrame(frame_control, fg_color="transparent")
+    frame_audio_slider.pack(fill="x", padx=5, pady=5)
+
+    label_audio = ctk.CTkLabel(frame_audio_slider, text="音频AI阈值 0.3", width=LABEL_W, anchor="w")
+    label_audio.pack(side="left", padx=5)
+
+    def audio_slider_changed(value):
+        label_audio.configure(text="音频AI阈值 " + format(value, '.2f'))
+
+    slider_audio = ctk.CTkSlider(frame_audio_slider, from_=0.1, to=0.6, width=160)
+    slider_audio.set(0.3)
+    slider_audio.configure(command=audio_slider_changed)
+    slider_audio.pack(side="left", padx=10, fill="x", expand=True)
 
     # 网络采样数量（标签列对齐 + 输入框）
     frame_net = ctk.CTkFrame(frame_control, fg_color="transparent")
@@ -130,6 +145,7 @@ def create_classify_page(parent, logger=None):
                 use_era=var_era.get(),
                 use_audio=var_audio.get(),
                 ai_threshold=slider_ai.get(),
+                audio_threshold=slider_audio.get(),
                 net_limit=int(entry_net_limit.get()),
                 log=page_logger,
             )
@@ -159,15 +175,20 @@ def create_classify_page(parent, logger=None):
 
         threading.Thread(target=_worker, daemon=True).start()
 
-        def _poll():
-            if _done.is_set():
-                status.configure(text="状态：完成 ✅")
-                is_running = False
-                reset_button()
-            else:
-                main_frame.after(200, _poll)
+        # ✅ 事件驱动：_done.wait(0.3) 阻塞轮询改为一次性等待，
+        #    完成后单次 after 回主线程更新 UI；未等待期间主线程自由。
+        #    用独立守护线程等待（避免占用 Tk 事件循环）。
+        def _wait_and_finish():
+            _done.wait()  # 阻塞直到 worker 完成
+            main_frame.after(0, _on_done)
 
-        main_frame.after(200, _poll)
+        def _on_done():
+            nonlocal is_running
+            status.configure(text="状态：完成 ✅")
+            is_running = False
+            reset_button()
+
+        threading.Thread(target=_wait_and_finish, daemon=True).start()
 
     # ================= 按钮（统一 action_button，锚定底部） =================
     btn_start = action_button(main_frame, "▶ 开始分类", start)
@@ -186,6 +207,7 @@ def _cli(args):
     p.add_argument("--no-artist", action="store_true", help="禁用歌手精选")
     p.add_argument("--no-era", action="store_true", help="禁用年代")
     p.add_argument("--ai-threshold", type=float, default=0.4)
+    p.add_argument("--audio-threshold", type=float, default=0.3)
     p.add_argument("--audio", action="store_true", help="启用音频（PANNs）分类")
     p.add_argument("--net-limit", type=int, default=10)
     p.add_argument("--gui", action="store_true", help="忽略参数，启动 GUI")
@@ -204,6 +226,7 @@ def _cli(args):
         use_era=not ns.no_era,
         use_audio=ns.audio,
         ai_threshold=ns.ai_threshold,
+        audio_threshold=ns.audio_threshold,
         net_limit=ns.net_limit,
     )
 

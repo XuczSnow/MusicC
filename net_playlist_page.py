@@ -149,7 +149,7 @@ def create_net_page(parent, logger=None):
             )
 
         # ⚠️ 子线程不直接改 Tk（after 也非线程安全）。
-        # 用 threading.Event 通知主线程 after 回调，再更新按钮状态。
+        # 用 threading.Event + 守护线程等待，一次性回主线程恢复按钮（事件驱动，零轮询）。
         _done = threading.Event()
 
         def _worker():
@@ -159,13 +159,11 @@ def create_net_page(parent, logger=None):
         threading.Thread(target=_worker, daemon=True).start()
         main_frame.after(0, lambda: btn.configure(state="disabled"))
 
-        def _poll():
-            if _done.is_set():
-                btn.configure(state="enabled")
-            else:
-                main_frame.after(200, _poll)
+        def _wait_and_finish():
+            _done.wait()
+            main_frame.after(0, lambda: btn.configure(state="enabled"))
 
-        main_frame.after(200, _poll)
+        threading.Thread(target=_wait_and_finish, daemon=True).start()
 
     btn = action_button(main_frame, "▶ 生成歌单", run)
     return main_frame

@@ -26,30 +26,20 @@ def create_metadata_page(parent, logger=None):
     # 路径选择
     path_entry = folder_picker_row(frame, placeholder="选择音乐目录")
 
-    # 选项（第 1 行：覆盖类）
+    # 选项（单行：覆盖类 + 备份，统一间距）
     option_frame = section_frame(frame, "选项")
     row1 = ctk.CTkFrame(option_frame, fg_color="transparent")
     row1.pack(fill="x", padx=4)
 
     overwrite_var = ctk.BooleanVar(value=False)
-    ctk.CTkCheckBox(row1, text="覆盖原始元数据", variable=overwrite_var).pack(side="left", padx=10, pady=5)
+    ctk.CTkCheckBox(row1, text="覆盖原始元数据", variable=overwrite_var).pack(side="left", padx=6, pady=5)
     overwrite_dirty_var = ctk.BooleanVar(value=False)
-    ctk.CTkCheckBox(row1, text="强制覆盖脏数据", variable=overwrite_dirty_var).pack(side="left", padx=10, pady=5)
+    ctk.CTkCheckBox(row1, text="强制覆盖脏数据", variable=overwrite_dirty_var).pack(side="left", padx=6, pady=5)
     overwrite_date_var = ctk.BooleanVar(value=False)
-    ctk.CTkCheckBox(row1, text="强制更新年份", variable=overwrite_date_var).pack(side="left", padx=10, pady=5)
-
-    # 选项（第 2 行：AI 类，另起一行）
-    ai_row = ctk.CTkFrame(option_frame, fg_color="transparent")
-    ai_row.pack(fill="x", padx=4, pady=(2, 0))
-
-    ai_sync_var = ctk.BooleanVar(value=False)
-    ctk.CTkCheckBox(ai_row, text="AI 同步（补时间戳）", variable=ai_sync_var).pack(side="left", padx=10, pady=5)
-    ai_fill_var = ctk.BooleanVar(value=False)
-    ctk.CTkCheckBox(ai_row, text="AI 增补（无歌词）", variable=ai_fill_var).pack(side="left", padx=10, pady=5)
-
-    # 备份：把修改过的歌曲复制到 源目录/bak/
+    ctk.CTkCheckBox(row1, text="强制更新年份", variable=overwrite_date_var).pack(side="left", padx=6, pady=5)
+    # 备份：把修改过的歌曲复制到 源目录/bak/（与覆盖类同一行）
     backup_var = ctk.BooleanVar(value=False)
-    ctk.CTkCheckBox(ai_row, text="备份修改歌曲", variable=backup_var).pack(side="left", padx=10, pady=5)
+    ctk.CTkCheckBox(row1, text="备份修改歌曲", variable=backup_var).pack(side="left", padx=6, pady=5)
 
     # 平台与参数
     platform_frame = section_frame(frame, "平台与参数")
@@ -67,11 +57,23 @@ def create_metadata_page(parent, logger=None):
     pixel_limit.pack(side="right", padx=5)
     ctk.CTkLabel(platform_frame, text="图像最大分辨率").pack(side="right", padx=5)
 
+    # 歌词选项：AI 同步 / AI 增补 / 歌词时间偏移
+    lyric_frame = section_frame(frame, "歌词选项")
+
+    ai_row = ctk.CTkFrame(lyric_frame, fg_color="transparent")
+    ai_row.pack(fill="x", padx=4)
+
+    ai_sync_var = ctk.BooleanVar(value=False)
+    ctk.CTkCheckBox(ai_row, text="AI 同步（补时间戳）", variable=ai_sync_var).pack(side="left", padx=10, pady=5)
+    ai_fill_var = ctk.BooleanVar(value=False)
+    ctk.CTkCheckBox(ai_row, text="AI 增补（无歌词）", variable=ai_fill_var).pack(side="left", padx=10, pady=5)
+
     # 歌词偏移（ms）：正=滞后，负=提前；0 表示不偏移
-    offset_frame = section_frame(frame, "歌词偏移")
-    ctk.CTkLabel(offset_frame, text="歌词时间偏移 (ms)").pack(side="left", padx=5)
-    ctk.CTkLabel(offset_frame, text="正数=滞后  负数=提前  0=不偏移").pack(side="left", padx=5)
-    lrc_offset = ctk.CTkEntry(offset_frame, width=80)
+    offset_row = ctk.CTkFrame(lyric_frame, fg_color="transparent")
+    offset_row.pack(fill="x", padx=4, pady=(2, 0))
+    ctk.CTkLabel(offset_row, text="歌词时间偏移 (ms)").pack(side="left", padx=5)
+    ctk.CTkLabel(offset_row, text="正数=滞后  负数=提前  0=不偏移").pack(side="left", padx=5)
+    lrc_offset = ctk.CTkEntry(offset_row, width=80)
     lrc_offset.insert(0, "0")
     lrc_offset.pack(side="right", padx=5)
 
